@@ -1,0 +1,7 @@
+build/
+.cache/
+*.swp
+*.o
+*.so
+*.lib
+*.dll
