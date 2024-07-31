@@ -118,8 +118,8 @@ struct token {
     };
 };
 
-const char* token_tag_to_string(enum token_tag);
-bool token_tag_is_symbol(enum token_tag);
-bool token_tag_is_keyword(enum token_tag);
+[[nodiscard]] const char* token_tag_to_string(enum token_tag);
+[[nodiscard]] bool token_tag_is_symbol(enum token_tag);
+[[nodiscard]] bool token_tag_is_keyword(enum token_tag);
 
-struct str_view token_str_view(const char* data, const struct token*);
+[[nodiscard]] struct str_view token_str_view(const char* data, const struct token*);
