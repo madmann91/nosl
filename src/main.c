@@ -1,4 +1,5 @@
 #include "parse.h"
+#include "check.h"
 #include "ast.h"
 
 #include <overture/cli.h>
@@ -56,6 +57,8 @@ static bool compile_file(const char* file_name, const struct options* options) {
             .disable_colors = options->disable_colors || !is_term(stdout)
         });
     }
+
+    check(program, &log);
 
     goto done;
 

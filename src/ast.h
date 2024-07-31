@@ -3,6 +3,7 @@
 #include "token.h"
 
 #include <overture/log.h>
+#include <overture/vec.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -243,11 +244,13 @@ struct ast_print_options {
     size_t indent;
 };
 
-bool unary_expr_tag_is_postfix(enum unary_expr_tag);
-int binary_expr_tag_precedence(enum binary_expr_tag);
-const char* prim_type_tag_to_string(enum prim_type_tag);
-const char* shader_type_tag_to_string(enum shader_type_tag);
-const char* binary_expr_tag_to_string(enum binary_expr_tag);
-const char* unary_expr_tag_to_string(enum unary_expr_tag);
+SMALL_VEC_DECL(small_ast_vec, struct ast*, PUBLIC)
+
+[[nodiscard]] bool unary_expr_tag_is_postfix(enum unary_expr_tag);
+[[nodiscard]] int binary_expr_tag_precedence(enum binary_expr_tag);
+[[nodiscard]] const char* prim_type_tag_to_string(enum prim_type_tag);
+[[nodiscard]] const char* shader_type_tag_to_string(enum shader_type_tag);
+[[nodiscard]] const char* binary_expr_tag_to_string(enum binary_expr_tag);
+[[nodiscard]] const char* unary_expr_tag_to_string(enum unary_expr_tag);
 
 void ast_print(FILE*, const struct ast*, const struct ast_print_options*);

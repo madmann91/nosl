@@ -15,6 +15,8 @@ enum styles {
     STYLE_COUNT
 };
 
+SMALL_VEC_IMPL(small_ast_vec, struct ast*, PUBLIC)
+
 static void print(FILE*, size_t, const struct ast*, const char* [STYLE_COUNT]);
 
 bool unary_expr_tag_is_postfix(enum unary_expr_tag tag) {
