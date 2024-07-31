@@ -5,6 +5,7 @@
 #include <overture/log.h>
 #include <overture/str.h>
 #include <overture/mem_pool.h>
+#include <overture/mem.h>
 
 #include <assert.h>
 #include <string.h>
@@ -70,7 +71,7 @@ static inline struct ast* alloc_ast(
 static const char* parse_ident(struct parser* parser) {
     struct str_view str_view = token_str_view(parser->lexer.data, parser->ahead);
     char* name = mem_pool_alloc(parser->mem_pool, str_view.length + 1, alignof(char));
-    memcpy(name, str_view.data, str_view.length);
+    xmemcpy(name, str_view.data, str_view.length);
     name[str_view.length] = 0;
     expect_token(parser, TOKEN_IDENT);
     return name;
@@ -143,7 +144,7 @@ static struct ast* parse_string_literal(struct parser* parser) {
         eat_token(parser, TOKEN_STRING_LITERAL);
     }
     char* string_literal = mem_pool_alloc(parser->mem_pool, str.length + 1, alignof(char));
-    memcpy(string_literal, str.data, str.length);
+    xmemcpy(string_literal, str.data, str.length);
     string_literal[str.length] = 0;
     str_destroy(&str);
     return alloc_ast(parser, &begin_pos, &(struct ast) {
