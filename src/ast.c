@@ -78,7 +78,7 @@ const char* unary_expr_tag_to_string(enum unary_expr_tag tag) {
     }
 }
 
-static inline bool needs_semicolon(struct ast* stmt) {
+static inline bool needs_semicolon(const struct ast* stmt) {
     switch (stmt->tag) {
         case AST_VAR_DECL:
         case AST_FUNC_DECL:
@@ -143,6 +143,17 @@ static void print_dim(
         print(file, indent, ast, styles);
         fputs("]", file);
     }
+}
+
+static void print_stmt(
+    FILE* file,
+    size_t indent,
+    const struct ast* ast,
+    const char* styles[STYLE_COUNT])
+{
+    print(file, indent, ast, styles);
+    if (needs_semicolon(ast))
+        fputs(";", file);
 }
 
 static void print(
@@ -294,9 +305,7 @@ static void print(
             fputs("{", file);
             for (struct ast* stmt = ast->block.stmts; stmt; stmt = stmt->next) {
                 print_new_line(file, indent + 1);
-                print(file, indent + 1, stmt, styles);
-                if (needs_semicolon(stmt))
-                    fputs(";", file);
+                print_stmt(file, indent + 1, stmt, styles);
             }
             if (ast->block.stmts)
                 print_new_line(file, indent);
@@ -306,13 +315,13 @@ static void print(
             fprintf(file, "%swhile%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
             print_paren(file, indent, ast->while_loop.cond, styles);
             fputs(" ", file);
-            print(file, indent, ast->while_loop.body, styles);
+            print_stmt(file, indent, ast->while_loop.body, styles);
             break;
         case AST_FOR_LOOP:
             fprintf(file, "%sfor%s (", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
             if (ast->for_loop.init)
-                print(file, indent, ast->for_loop.init, styles);
-            if (!ast->for_loop.init || needs_semicolon(ast->for_loop.init))
+                print_stmt(file, indent, ast->for_loop.init, styles);
+            else
                 fputs(";", file);
             fputs(" ", file);
             if (ast->for_loop.cond)
@@ -321,11 +330,11 @@ static void print(
             if (ast->for_loop.inc)
                 print(file, indent, ast->for_loop.inc, styles);
             fputs(") ", file);
-            print(file, indent, ast->for_loop.body, styles);
+            print_stmt(file, indent, ast->for_loop.body, styles);
             break;
         case AST_DO_WHILE_LOOP:
             fprintf(file, "%sdo%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
-            print(file, indent, ast->do_while_loop.body, styles);
+            print_stmt(file, indent, ast->do_while_loop.body, styles);
             fputs(" ", file);
             fprintf(file, "%swhile%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
             print_paren(file, indent, ast->do_while_loop.cond, styles);
@@ -335,10 +344,10 @@ static void print(
             fprintf(file, "%sif%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
             print_paren(file, indent, ast->if_stmt.cond, styles);
             fputs(" ", file);
-            print(file, indent, ast->if_stmt.then_stmt, styles);
+            print_stmt(file, indent, ast->if_stmt.then_stmt, styles);
             if (ast->if_stmt.else_stmt) {
                 fprintf(file, " %selse%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
-                print(file, indent, ast->if_stmt.else_stmt, styles);
+                print_stmt(file, indent, ast->if_stmt.else_stmt, styles);
             }
             break;
         case AST_BREAK_STMT:
