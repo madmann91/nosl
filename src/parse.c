@@ -179,16 +179,33 @@ static struct ast* parse_cast_expr(struct parser* parser) {
 }
 
 static struct ast* parse_compound_expr(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
-    eat_token(parser, TOKEN_LPAREN);
-    struct ast* elems = parse_many(parser, TOKEN_RPAREN, TOKEN_COMMA, parse_expr);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    struct ast* first = parse_expr(parser);
+    if (parser->ahead->tag != TOKEN_COMMA)
+        return first;
+
+    struct ast* prev = first;
+    while (accept_token(parser, TOKEN_COMMA)) {
+        prev->next = parse_expr(parser);
+        prev = prev->next;
+    }
+    return alloc_ast(parser, &first->source_range.begin, &(struct ast) {
         .tag = AST_COMPOUND_EXPR,
-        .compound_expr.elems = elems
+        .compound_expr.elems = first
     });
 }
 
-static struct ast* parse_cast_or_compound_expr(struct parser* parser) {
+static struct ast* parse_paren_expr(struct parser* parser) {
+    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    eat_token(parser, TOKEN_LPAREN);
+    struct ast* inner_expr = parse_compound_expr(parser);
+    expect_token(parser, TOKEN_RPAREN);
+    return alloc_ast(parser, &begin_pos, &(struct ast) {
+        .tag = AST_PAREN_EXPR,
+        .paren_expr.inner_expr = inner_expr
+    });
+}
+
+static struct ast* parse_cast_or_paren_expr(struct parser* parser) {
     switch (parser->ahead[1].tag) {
 #define x(name, ...) case TOKEN_##name:
         PRIM_TYPE_LIST(x)
@@ -197,7 +214,7 @@ static struct ast* parse_cast_or_compound_expr(struct parser* parser) {
                 return parse_cast_expr(parser);
             [[fallthrough]];
         default:
-            return parse_compound_expr(parser);
+            return parse_paren_expr(parser);
     }
 }
 
@@ -233,7 +250,7 @@ static struct ast* parse_primary_expr(struct parser* parser) {
         case TOKEN_STRING_LITERAL: return parse_string_literal(parser);
         case TOKEN_IDENT:          return parse_ident_expr(parser);
         case TOKEN_LBRACE:         return parse_compound_init(parser);
-        case TOKEN_LPAREN:         return parse_cast_or_compound_expr(parser);
+        case TOKEN_LPAREN:         return parse_cast_or_paren_expr(parser);
 #define x(name, ...) case TOKEN_##name:
         PRIM_TYPE_LIST(x)
 #undef x
@@ -441,6 +458,15 @@ static struct ast* parse_shader_type(struct parser* parser) {
     });
 }
 
+static struct ast* parse_named_type(struct parser* parser) {
+    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    const char* name = parse_ident(parser);
+    return alloc_ast(parser, &begin_pos, &(struct ast) {
+        .tag = AST_NAMED_TYPE,
+        .named_type.name = name
+    });
+}
+
 static struct ast* parse_type(struct parser* parser) {
     switch (parser->ahead->tag) {
 #define x(name, ...) case TOKEN_##name:
@@ -448,6 +474,8 @@ static struct ast* parse_type(struct parser* parser) {
 #undef x
         case TOKEN_CLOSURE:
             return parse_prim_type(parser);
+        case TOKEN_IDENT:
+            return parse_named_type(parser);
         default:
             return parse_error(parser, "type");
     }
@@ -530,7 +558,7 @@ static struct ast* parse_if_stmt(struct parser* parser) {
     struct source_pos begin_pos = parser->ahead->source_range.begin;
     eat_token(parser, TOKEN_IF);
     expect_token(parser, TOKEN_LPAREN);
-    struct ast* cond = parse_expr(parser);
+    struct ast* cond = parse_compound_expr(parser);
     expect_token(parser, TOKEN_RPAREN);
     struct ast* then_stmt = parse_stmt(parser);
     struct ast* else_stmt = NULL;
@@ -578,7 +606,7 @@ static struct ast* parse_while_loop(struct parser* parser) {
     struct source_pos begin_pos = parser->ahead->source_range.begin;
     eat_token(parser, TOKEN_WHILE);
     expect_token(parser, TOKEN_LPAREN);
-    struct ast* cond = parse_expr(parser);
+    struct ast* cond = parse_compound_expr(parser);
     expect_token(parser, TOKEN_RPAREN);
     struct ast* body = parse_stmt(parser);
     return alloc_ast(parser, &begin_pos, &(struct ast) {
@@ -596,7 +624,7 @@ static struct ast* parse_do_while_loop(struct parser* parser) {
     struct ast* body = parse_stmt(parser);
     expect_token(parser, TOKEN_WHILE);
     expect_token(parser, TOKEN_LPAREN);
-    struct ast* cond = parse_expr(parser);
+    struct ast* cond = parse_compound_expr(parser);
     expect_token(parser, TOKEN_RPAREN);
     expect_token(parser, TOKEN_SEMICOLON);
     return alloc_ast(parser, &begin_pos, &(struct ast) {
@@ -705,12 +733,12 @@ static struct ast* parse_for_loop(struct parser* parser) {
     struct ast* init = parse_for_init(parser);
     struct ast* cond = NULL;
     if (!accept_token(parser, TOKEN_SEMICOLON)) {
-        cond = parse_expr(parser);
+        cond = parse_compound_expr(parser);
         expect_token(parser, TOKEN_SEMICOLON);
     }
     struct ast* inc = NULL;
     if (!accept_token(parser, TOKEN_RPAREN)) {
-        inc  = parse_expr(parser);
+        inc  = parse_compound_expr(parser);
         expect_token(parser, TOKEN_RPAREN);
     }
     struct ast* body = parse_stmt(parser);
@@ -731,6 +759,12 @@ static struct ast* parse_local_decl(struct parser* parser) {
         parser->ahead[1].tag == TOKEN_LPAREN)
         return parse_func_decl(parser, type);
     return parse_var_decl(parser, type, true);
+}
+
+static struct ast* parse_empty_stmt(struct parser* parser) {
+    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    eat_token(parser, TOKEN_SEMICOLON);
+    return alloc_ast(parser, &begin_pos, &(struct ast) { .tag = AST_EMPTY_STMT });
 }
 
 static struct ast* parse_stmt(struct parser* parser) {
@@ -768,11 +802,14 @@ static struct ast* parse_stmt(struct parser* parser) {
         case TOKEN_TILDE:
         case TOKEN_INT_LITERAL:
         case TOKEN_FLOAT_LITERAL:
+        case TOKEN_LPAREN:
         {
-            struct ast* expr = parse_expr(parser);
+            struct ast* expr = parse_compound_expr(parser);
             expect_token(parser, TOKEN_SEMICOLON);
             return expr;
         }
+        case TOKEN_SEMICOLON:
+            return parse_empty_stmt(parser);
         default:
             return parse_error(parser, "statement");
     }

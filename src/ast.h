@@ -102,6 +102,7 @@ enum ast_tag {
     AST_UNARY_EXPR,
     AST_CALL_EXPR,
     AST_CONSTRUCT_EXPR,
+    AST_PAREN_EXPR,
     AST_COMPOUND_EXPR,
     AST_COMPOUND_INIT,
     AST_TERNARY_EXPR,
@@ -117,11 +118,15 @@ enum ast_tag {
     AST_IF_STMT,
     AST_BREAK_STMT,
     AST_CONTINUE_STMT,
-    AST_RETURN_STMT
+    AST_RETURN_STMT,
+    AST_EMPTY_STMT
 };
+
+struct type;
 
 struct ast {
     enum ast_tag tag;
+    const struct type* type;
     struct source_range source_range;
     struct ast* next;
     union {
@@ -199,6 +204,9 @@ struct ast {
             struct ast* elems;
         } compound_expr, compound_init;
         struct {
+            struct ast* inner_expr;
+        } paren_expr;
+        struct {
             struct ast* type;
             struct ast* value;
         } cast_expr;
@@ -235,7 +243,11 @@ struct ast {
         } if_stmt;
         struct {
             struct ast* value;
+            struct ast* shader_or_func;
         } return_stmt;
+        struct {
+            struct ast* loop;
+        } continue_stmt, break_stmt;
     };
 };
 
@@ -254,3 +266,8 @@ SMALL_VEC_DECL(small_ast_vec, struct ast*, PUBLIC)
 [[nodiscard]] const char* unary_expr_tag_to_string(enum unary_expr_tag);
 
 void ast_print(FILE*, const struct ast*, const struct ast_print_options*);
+void ast_dump(const struct ast*);
+
+[[nodiscard]] size_t ast_list_size(const struct ast*);
+[[nodiscard]] size_t ast_field_count(const struct ast*);
+[[nodiscard]] const char* ast_decl_name(const struct ast*);

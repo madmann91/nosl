@@ -81,6 +81,7 @@ const char* unary_expr_tag_to_string(enum unary_expr_tag tag) {
 static inline bool needs_semicolon(struct ast* stmt) {
     switch (stmt->tag) {
         case AST_VAR_DECL:
+        case AST_FUNC_DECL:
         case AST_BLOCK:
         case AST_WHILE_LOOP:
         case AST_FOR_LOOP:
@@ -89,6 +90,7 @@ static inline bool needs_semicolon(struct ast* stmt) {
         case AST_BREAK_STMT:
         case AST_CONTINUE_STMT:
         case AST_RETURN_STMT:
+        case AST_EMPTY_STMT:
             return false;
         default:
             return true;
@@ -128,6 +130,19 @@ static void print_paren(
     fputs("(", file);
     print(file, indent, ast, styles);
     fputs(")", file);
+}
+
+static void print_dim(
+    FILE* file,
+    size_t indent,
+    const struct ast* ast,
+    const char* styles[STYLE_COUNT])
+{
+    if (ast) {
+        fputs("[", file);
+        print(file, indent, ast, styles);
+        fputs("]", file);
+    }
 }
 
 static void print(
@@ -198,13 +213,18 @@ static void print(
             break;
         case AST_VAR:
             fputs(ast->var.name, file);
+            print_dim(file, indent, ast->var.dim, styles);
             if (ast->var.init) {
                 fputs(" = ", file);
                 print(file, indent, ast->var.init, styles);
             }
             break;
         case AST_PARAM:
-            fputs(ast->param.name, file);
+            if (ast->param.is_output)
+                fprintf(file, "%soutput%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
+            print(file, indent, ast->param.type, styles);
+            fprintf(file, " %s", ast->param.name);
+            print_dim(file, indent, ast->param.dim, styles);
             if (ast->param.init) {
                 fputs(" = ", file);
                 print(file, indent, ast->param.init, styles);
@@ -238,11 +258,16 @@ static void print(
             print(file, indent, ast->construct_expr.type, styles);
             print_many(file, indent, "(", ", ", ")", ast->construct_expr.args, styles);
             break;
+        case AST_PAREN_EXPR:
+            fputs("(", file);
+            print(file, indent, ast->paren_expr.inner_expr, styles);
+            fputs(")", file);
+            break;
         case AST_COMPOUND_EXPR:
-            print_many(file, indent, "(", ", ", ")", ast->compound_expr.elems, styles);
+            print_many(file, indent, "", ", ", "", ast->compound_expr.elems, styles);
             break;
         case AST_COMPOUND_INIT:
-            print_many(file, indent, "(", ", ", ")", ast->compound_init.elems, styles);
+            print_many(file, indent, "{", ", ", "}", ast->compound_init.elems, styles);
             break;
         case AST_TERNARY_EXPR:
             print(file, indent, ast->ternary_expr.cond, styles);
@@ -289,10 +314,10 @@ static void print(
                 print(file, indent, ast->for_loop.init, styles);
             if (!ast->for_loop.init || needs_semicolon(ast->for_loop.init))
                 fputs(";", file);
+            fputs(" ", file);
             if (ast->for_loop.cond)
                 print(file, indent, ast->for_loop.cond, styles);
-            else
-                fputs("; ", file);
+            fputs("; ", file);
             if (ast->for_loop.inc)
                 print(file, indent, ast->for_loop.inc, styles);
             fputs(") ", file);
@@ -330,6 +355,9 @@ static void print(
             }
             fputs(";", file);
             break;
+        case AST_EMPTY_STMT:
+            fputs(";", file);
+            break;
         default:
             assert(false && "invalid AST node");
             break;
@@ -347,5 +375,39 @@ void ast_print(FILE* file, const struct ast* ast, const struct ast_print_options
     for (const struct ast* decl = ast; decl; decl = decl->next) {
         print(file, options->indent, decl, styles);
         print_new_line(file, options->indent);
+    }
+}
+
+void ast_dump(const struct ast* ast) {
+    ast_print(stdout, ast, &(struct ast_print_options) {
+        .disable_colors = !is_term(stdout)
+    });
+    fputs("\n", stdout);
+    fflush(stdout);
+}
+
+size_t ast_list_size(const struct ast* ast) {
+    size_t size = 0;
+    while (ast)
+        size++, ast = ast->next;
+    return size;
+}
+
+size_t ast_field_count(const struct ast* ast) {
+    assert(ast->tag == AST_STRUCT_DECL);
+    size_t field_count = 0;
+    for (struct ast* field = ast->struct_decl.fields; field; field = field->next) {
+        assert(field->tag == AST_VAR_DECL);
+        field_count += ast_list_size(field->var_decl.vars);
+    }
+    return field_count;
+}
+
+const char* ast_decl_name(const struct ast* ast) {
+    switch (ast->tag) {
+        case AST_STRUCT_DECL: return ast->struct_decl.name;
+        case AST_FUNC_DECL:   return ast->func_decl.name;
+        case AST_SHADER_DECL: return ast->shader_decl.name;
+        default:              return "";
     }
 }

@@ -4,8 +4,12 @@
 
 #include <stddef.h>
 
+#include <overture/vec.h>
+
 enum type_tag {
+    TYPE_ERROR,
     TYPE_PRIM,
+    TYPE_CLOSURE,
     TYPE_SHADER,
     TYPE_ARRAY,
     TYPE_FUNC,
@@ -30,6 +34,9 @@ struct type {
         enum prim_type_tag prim_type;
         enum shader_type_tag shader_type;
         struct {
+            const struct type* inner_type;
+        } closure_type;
+        struct {
             const struct type* elem_type;
             size_t elem_count;
         } array_type;
@@ -46,6 +53,18 @@ struct type {
     };
 };
 
+SMALL_VEC_DECL(small_type_vec, const struct type*, PUBLIC)
+
 [[nodiscard]] bool type_tag_is_nominal(enum type_tag);
 [[nodiscard]] bool type_is_unsized_array(const struct type*);
-[[nodiscard]] bool type_is_nominal(const struct type* type);
+[[nodiscard]] bool type_is_nominal(const struct type*);
+[[nodiscard]] bool type_is_void(const struct type*);
+[[nodiscard]] bool type_is_prim_type(const struct type*, enum prim_type_tag);
+
+struct type_print_options {
+    bool disable_colors;
+};
+
+[[nodiscard]] char* type_to_string(const struct type*, const struct type_print_options*);
+
+void type_print(FILE*, const struct type*, const struct type_print_options*);

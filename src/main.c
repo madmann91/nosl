@@ -15,6 +15,7 @@
 struct options {
     bool print_ast;
     bool disable_colors;
+    uint32_t max_warns;
     uint32_t max_errors;
 };
 
@@ -24,9 +25,17 @@ static enum cli_state usage(void*, char*) {
         "options:\n"
         "  -h  --help               Shows this message.\n"
         "      --no-color           Disables colors in the output.\n"
-        "      --max-errors <n>     Sets the maximum number of error messages.\n"
+        "      --max-errors <n>     Sets the maximum number of error messages to display.\n"
+        "      --max-warns <n>      Sets the maximum number of warning messages to display.\n"
         "      --print-ast          Prints the AST on the standard output.\n");
     return CLI_STATE_ERROR;
+}
+
+static inline void replace_tabs(char* text, size_t length) {
+    for (size_t i = 0; i < length; ++i) {
+        if (text[i] == '\t')
+            text[i] = ' ';
+    }
 }
 
 static bool compile_file(const char* file_name, const struct options* options) {
@@ -37,9 +46,13 @@ static bool compile_file(const char* file_name, const struct options* options) {
         return false;
     }
 
+    // Necessary to make log message diagnostics align with the underlined text.
+    replace_tabs(file_data, file_size);
+
     struct log log = {
         .file = stderr,
         .disable_colors = options->disable_colors || !is_term(stderr),
+        .max_warns = options->max_warns,
         .max_errors = options->max_errors,
         .source_name = file_name,
         .source_data = (struct str_view) { .data = file_data, .length = file_size }
@@ -76,6 +89,7 @@ static bool parse_options(int argc, char** argv, struct options* options) {
         cli_flag(NULL, "--no-color",   &options->disable_colors),
         cli_flag(NULL, "--print-ast",  &options->print_ast),
         cli_option_uint32(NULL, "--max-errors", &options->max_errors),
+        cli_option_uint32(NULL, "--max-warns", &options->max_warns),
     };
     if (!cli_parse_options(argc, argv, cli_options, sizeof(cli_options) / sizeof(cli_options[0])))
         return false;
@@ -88,7 +102,8 @@ int main(int argc, char** argv) {
     struct options options = {
         .print_ast = false,
         .disable_colors = false,
-        .max_errors = UINT32_MAX
+        .max_errors = UINT32_MAX,
+        .max_warns = UINT32_MAX
     };
     if (!parse_options(argc, argv, &options))
         return 1;

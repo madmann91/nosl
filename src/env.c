@@ -21,6 +21,7 @@ static inline bool are_symbol_names_equal(const char* const* string_ptr, const c
 MAP_DEFINE(symbol_table, const char*, struct symbol*, hash_symbol_name, are_symbol_names_equal, PRIVATE)
 
 struct scope {
+    struct ast* ast;
     struct symbol_table symbol_table;
     struct scope* prev;
     struct scope* next;
@@ -96,6 +97,26 @@ void env_destroy(struct env* env) {
     free(env);
 }
 
+struct ast* env_find_enclosing_shader_or_func(struct env* env) {
+    for (struct scope* scope = env->scope; scope; scope = scope->prev) {
+        if (scope->ast->tag == AST_SHADER_DECL || scope->ast->tag == AST_FUNC_DECL)
+            return scope->ast;
+    }
+    return NULL;
+}
+
+struct ast* env_find_enclosing_loop(struct env* env) {
+    for (struct scope* scope = env->scope; scope; scope = scope->prev) {
+        if (scope->ast->tag == AST_WHILE_LOOP ||
+            scope->ast->tag == AST_FOR_LOOP ||
+            scope->ast->tag == AST_DO_WHILE_LOOP)
+        {
+            return scope->ast;
+        }
+    }
+    return NULL;
+}
+
 static inline struct symbol* find_first_symbol(struct scope* scope, const char* name) {
     struct symbol* const* symbol_ptr = symbol_table_find(&scope->symbol_table, &name);
     return symbol_ptr ? *symbol_ptr : NULL;
@@ -147,11 +168,12 @@ bool env_insert_symbol(struct env* env, const char* name, struct ast* ast, bool 
     return true;
 }
 
-void env_push_scope(struct env* env) {
+void env_push_scope(struct env* env, struct ast* ast) {
     struct scope* scope = env->scope;
     if (!scope->next)
         scope->next = alloc_scope(scope);
     env->scope = scope->next;
+    env->scope->ast = ast;
 }
 
 void env_pop_scope(struct env* env) {
