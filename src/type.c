@@ -37,6 +37,56 @@ bool type_is_void(const struct type* type) {
     return type_is_prim_type(type, PRIM_TYPE_VOID);
 }
 
+bool type_is_triple(const struct type* type) {
+    if (type->tag != TYPE_PRIM)
+        return false;
+    return
+        type->prim_type == PRIM_TYPE_COLOR ||
+        type->prim_type == PRIM_TYPE_POINT ||
+        type->prim_type == PRIM_TYPE_VECTOR ||
+        type->prim_type == PRIM_TYPE_NORMAL;
+}
+
+bool type_is_implicitly_convertible_to(const struct type* from, const struct type* to) {
+    if (from == to)
+        return true;
+    if (from->tag == TYPE_PRIM && to->tag == TYPE_PRIM) {
+        if (to->prim_type == PRIM_TYPE_INT)
+            return from->prim_type == PRIM_TYPE_BOOL;
+        if (to->prim_type == PRIM_TYPE_FLOAT)
+            return from->prim_type == PRIM_TYPE_BOOL || from->prim_type == PRIM_TYPE_INT;
+        if (type_is_triple(to)) {
+            return
+                from->prim_type == PRIM_TYPE_BOOL ||
+                from->prim_type == PRIM_TYPE_INT ||
+                from->prim_type == PRIM_TYPE_FLOAT;
+        }
+    }
+    if (from->tag == TYPE_ARRAY && to->tag == TYPE_ARRAY) {
+        return
+            from->array_type.elem_type == to->array_type.elem_type &&
+            (from->array_type.elem_count == 0 || (from->array_type.elem_count <= to->array_type.elem_count));
+    }
+    return false;
+}
+
+bool type_is_explicitly_convertible_to(const struct type* from, const struct type* to) {
+    if (type_is_implicitly_convertible_to(from, to))
+        return true;
+    if (from->tag == TYPE_PRIM && to->tag == TYPE_PRIM) {
+        if (type_is_triple(from) && type_is_triple(to))
+            return true;
+        if (to->prim_type == PRIM_TYPE_BOOL) {
+            return
+                from->prim_type == PRIM_TYPE_FLOAT ||
+                from->prim_type == PRIM_TYPE_INT;
+        }
+        if (to->prim_type == PRIM_TYPE_INT)
+            return from->prim_type == PRIM_TYPE_FLOAT;
+    }
+    return false;
+}
+
 static void print(FILE* file, const struct type* type, const char* styles[STYLE_COUNT]) {
     switch (type->tag) {
         case TYPE_ERROR:

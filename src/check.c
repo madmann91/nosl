@@ -4,14 +4,30 @@
 #include "type_table.h"
 
 #include <overture/log.h>
+#include <overture/mem_pool.h>
 
 #include <assert.h>
+#include <string.h>
+#include <stdlib.h>
 
 struct type_checker {
+    struct mem_pool* mem_pool;
     struct type_table* type_table;
     struct env* env;
     struct log* log;
 };
+
+struct const_eval {
+    bool is_const;
+    union {
+        int int_val;
+        float float_val;
+    };
+};
+
+static void check_stmt(struct type_checker*, struct ast*);
+static const struct type* check_type(struct type_checker*, struct ast*);
+static const struct type* check_expr(struct type_checker*, struct ast*, const struct type*);
 
 static inline void insert_symbol(
     struct type_checker* type_checker,
@@ -30,17 +46,56 @@ static inline void insert_symbol(
     log_note(type_checker->log, &old_ast->source_range, "previously declared here");
 }
 
-static void check_stmt(struct type_checker*, struct ast*);
-static const struct type* check_expr(struct type_checker*, struct ast*, const struct type*);
+static inline void insert_cast(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* type)
+{
+    struct ast* copy = MEM_POOL_ALLOC(*type_checker->mem_pool, struct ast);
+    memcpy(copy, ast, sizeof(struct ast));
+    copy->next = NULL;
+    ast->tag = AST_CAST_EXPR;
+    ast->cast_expr.type = NULL;
+    ast->cast_expr.value = ast;
+    ast->type = type;
+}
+
+static inline const struct type* coerce_expr(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    assert(ast->type);
+    if (!expected_type || ast->type == expected_type)
+        return ast->type;
+
+    if (type_is_implicitly_convertible_to(ast->type, expected_type)) {
+        insert_cast(type_checker, ast, expected_type);
+    } else if (expected_type->tag != TYPE_ERROR && ast->type->tag != TYPE_ERROR) {
+        struct type_print_options options = { .disable_colors = type_checker->log->disable_colors };
+        char* type_string = type_to_string(ast->type, &options);
+        char* expected_type_string = type_to_string(expected_type, &options);
+        log_error(type_checker->log, &ast->source_range, "expected type '%s', but got type '%s'",
+            expected_type_string, type_string);
+        free(type_string);
+        free(expected_type_string);
+    }
+    return expected_type;
+}
+
+static inline struct const_eval eval_const_int(struct type_checker*, struct ast* ast) {
+    // TODO: Use IR emitter for constants
+    return (struct const_eval) {
+        .is_const = ast->tag == AST_INT_LITERAL,
+        .int_val = ast->int_literal
+    };
+}
 
 static const struct type* check_prim_type(struct type_checker* type_checker, struct ast* ast) {
     const struct type* prim_type = type_table_get_prim_type(type_checker->type_table, ast->prim_type.tag);
     if (!ast->prim_type.is_closure)
         return prim_type;
-    return type_table_insert_type(type_checker->type_table, &(struct type) {
-        .tag = TYPE_CLOSURE,
-        .closure_type.inner_type = prim_type
-    });
+    return type_table_get_closure_type(type_checker->type_table, prim_type);
 }
 
 static const struct type* check_shader_type(struct type_checker* type_checker, struct ast* ast) {
@@ -59,36 +114,43 @@ static const struct type* check_type(struct type_checker* type_checker, struct a
         case AST_NAMED_TYPE:  return check_named_type(type_checker, ast);
         default:
             assert(false && "invalid type");
-            return type_table_insert_type(type_checker->type_table, &(struct type) { .tag = TYPE_ERROR });
+            return type_table_get_error_type(type_checker->type_table);
     }
 }
 
-static const struct type* check_array_dim(struct type_checker* type_checker, struct ast* ast, const struct type* elem_type) {
+static const struct type* check_array_dim(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* elem_type,
+    bool allow_unsized)
+{
     if (!ast)
         return elem_type;
 
-    check_expr(type_checker, ast, type_table_get_prim_type(type_checker->type_table, PRIM_TYPE_INT));
-
-    // TODO: Use IR emitter for constants
-    int dim = (int)ast->int_literal;
-    if (ast->tag != AST_INT_LITERAL || dim <= 0) {
-        log_error(type_checker->log, &ast->source_range,
-            "array dimension must be constant and strictly positive");
-        dim = 0;
-    }
-
-    return type_table_insert_type(type_checker->type_table, &(struct type) {
-        .tag = TYPE_ARRAY,
-        .array_type = {
-            .elem_type  = elem_type,
-            .elem_count = (size_t)dim
+    if (ast->tag == AST_UNSIZED_DIM) {
+        if (!allow_unsized) {
+            log_error(type_checker->log, &ast->source_range,
+                "unsized arrays are only allowed as function or shader parameters");
         }
-    });
+        return type_table_get_unsized_array_type(type_checker->type_table, elem_type);
+    } else {
+        check_expr(type_checker, ast, type_table_get_prim_type(type_checker->type_table, PRIM_TYPE_INT));
+        struct const_eval const_eval = eval_const_int(type_checker, ast);
+        if (!const_eval.is_const || const_eval.int_val <= 0) {
+            log_error(type_checker->log, &ast->source_range,
+                "array dimension must be constant and strictly positive");
+            const_eval.int_val = 1;
+        }
+        return type_table_get_sized_array_type(type_checker->type_table, elem_type, (size_t)const_eval.int_val);
+    }
 }
 
 static const struct type* check_var(struct type_checker* type_checker, struct ast* ast, const struct type* type) {
     insert_symbol(type_checker, ast->var.name, ast, false);
-    return ast->type = check_array_dim(type_checker, ast->var.dim, type);
+    type = check_array_dim(type_checker, ast->var.dim, type, false);
+    if (ast->var.init)
+        check_expr(type_checker, ast->var.init, type);
+    return ast->type = type;
 }
 
 static void check_var_decl(struct type_checker* type_checker, struct ast* ast) {
@@ -111,7 +173,7 @@ static void check_block(struct type_checker* type_checker, struct ast* ast) {
 
 static void check_param(struct type_checker* type_checker, struct ast* ast) {
     ast->type = check_type(type_checker, ast->param.type);
-    ast->type = check_array_dim(type_checker, ast->param.dim, ast->type);
+    ast->type = check_array_dim(type_checker, ast->param.dim, ast->type, true);
     insert_symbol(type_checker, ast->param.name, ast, false);
 }
 
@@ -250,12 +312,145 @@ static void check_stmt(struct type_checker* type_checker, struct ast* ast) {
     }
 }
 
+static const struct type* check_ident_expr(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    struct ast* symbol = env_find_one_symbol(type_checker->env, ast->ident_expr.name);
+    if (!symbol) {
+        struct small_ast_vec all_symbols = env_find_all_symbols(type_checker->env, ast->ident_expr.name);
+        log_error(type_checker->log, &ast->source_range,
+            all_symbols.elem_count > 0
+                ? "identifier '%s' is overloaded"
+                : "unknown identifier '%s'",
+            ast->ident_expr.name);
+        small_ast_vec_destroy(&all_symbols);
+        return type_table_get_error_type(type_checker->type_table);
+    }
+    return symbol->type;
+}
+
+static const struct type* check_binary_expr(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    // TODO
+    return type_table_get_error_type(type_checker->type_table);
+}
+
+static const struct type* check_unary_expr(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    // TODO
+    return type_table_get_error_type(type_checker->type_table);
+}
+
+static const struct type* check_call_expr(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    // TODO
+    return type_table_get_error_type(type_checker->type_table);
+}
+
+static const struct type* check_construct_expr(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    // TODO
+    return type_table_get_error_type(type_checker->type_table);
+}
+
+static const struct type* check_compound_expr(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    // TODO
+    return type_table_get_error_type(type_checker->type_table);
+}
+
+static const struct type* check_compound_init(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    // TODO
+    return type_table_get_error_type(type_checker->type_table);
+}
+
+static const struct type* check_ternary_expr(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    // TODO
+    return type_table_get_error_type(type_checker->type_table);
+}
+
+static const struct type* check_index_expr(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    // TODO
+    return type_table_get_error_type(type_checker->type_table);
+}
+
+static const struct type* check_proj_expr(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    // TODO
+    return type_table_get_error_type(type_checker->type_table);
+}
+
+static const struct type* check_cast_expr(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    // TODO
+    return type_table_get_error_type(type_checker->type_table);
+}
+
 static const struct type* check_expr(
     struct type_checker* type_checker,
     struct ast* ast,
     const struct type* expected_type)
 {
-    return NULL;
+    switch (ast->tag) {
+        case AST_BOOL_LITERAL:
+        case AST_INT_LITERAL:
+        case AST_FLOAT_LITERAL:
+        case AST_STRING_LITERAL: {
+            ast->type = type_table_get_prim_type(type_checker->type_table,
+                ast_literal_tag_to_prim_type_tag(ast->tag));
+            return coerce_expr(type_checker, ast, expected_type);
+        }
+        case AST_IDENT_EXPR:     return check_ident_expr(type_checker, ast, expected_type);
+        case AST_BINARY_EXPR:    return check_binary_expr(type_checker, ast, expected_type);
+        case AST_UNARY_EXPR:     return check_unary_expr(type_checker, ast, expected_type);
+        case AST_CALL_EXPR:      return check_call_expr(type_checker, ast, expected_type);
+        case AST_CONSTRUCT_EXPR: return check_construct_expr(type_checker, ast, expected_type);
+        case AST_PAREN_EXPR:     return check_expr(type_checker, ast->paren_expr.inner_expr, expected_type);
+        case AST_COMPOUND_EXPR:  return check_compound_expr(type_checker, ast, expected_type);
+        case AST_COMPOUND_INIT:  return check_compound_init(type_checker, ast, expected_type);
+        case AST_TERNARY_EXPR:   return check_ternary_expr(type_checker, ast, expected_type);
+        case AST_INDEX_EXPR:     return check_index_expr(type_checker, ast, expected_type);
+        case AST_PROJ_EXPR:      return check_proj_expr(type_checker, ast, expected_type);
+        case AST_CAST_EXPR:      return check_cast_expr(type_checker, ast, expected_type);
+        default:
+            assert(false && "invalid expression");
+            return type_table_get_error_type(type_checker->type_table);
+    }
 }
 
 static void check_struct_decl(struct type_checker* type_checker, struct ast* ast) {
@@ -290,8 +485,9 @@ static void check_top_level_decl(struct type_checker* type_checker, struct ast* 
     }
 }
 
-void check(struct ast* ast, struct log* log) {
+void check(struct mem_pool* mem_pool, struct ast* ast, struct log* log) {
     struct type_checker type_checker = {
+        .mem_pool = mem_pool,
         .type_table = type_table_create(),
         .env = env_create(),
         .log = log

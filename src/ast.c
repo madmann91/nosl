@@ -78,6 +78,57 @@ const char* unary_expr_tag_to_string(enum unary_expr_tag tag) {
     }
 }
 
+enum binary_expr_tag binary_expr_tag_remove_assign(enum binary_expr_tag tag) {
+    switch (tag) {
+        case BINARY_EXPR_ASSIGN_MUL:     return BINARY_EXPR_MUL;
+        case BINARY_EXPR_ASSIGN_DIV:     return BINARY_EXPR_DIV;
+        case BINARY_EXPR_ASSIGN_REM:     return BINARY_EXPR_REM;
+        case BINARY_EXPR_ASSIGN_ADD:     return BINARY_EXPR_ADD;
+        case BINARY_EXPR_ASSIGN_SUB:     return BINARY_EXPR_SUB;
+        case BINARY_EXPR_ASSIGN_LSHIFT:  return BINARY_EXPR_LSHIFT;
+        case BINARY_EXPR_ASSIGN_RSHIFT:  return BINARY_EXPR_RSHIFT;
+        case BINARY_EXPR_ASSIGN_BIT_AND: return BINARY_EXPR_BIT_AND;
+        case BINARY_EXPR_ASSIGN_BIT_XOR: return BINARY_EXPR_BIT_XOR;
+        case BINARY_EXPR_ASSIGN_BIT_OR:  return BINARY_EXPR_BIT_OR;
+        default:                         return tag;
+    }
+}
+
+bool binary_expr_tag_is_assign(enum binary_expr_tag tag) {
+    switch (tag) {
+#define x(name, ...) case BINARY_EXPR_##name:
+        ASSIGN_EXPR_LIST(x)
+#undef x
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool unary_expr_tag_is_inc_or_dec(enum unary_expr_tag tag) {
+    switch (tag) {
+        case UNARY_EXPR_POST_INC:
+        case UNARY_EXPR_POST_DEC:
+        case UNARY_EXPR_PRE_INC:
+        case UNARY_EXPR_PRE_DEC:
+            return true;
+        default:
+            return false;
+    }
+}
+
+enum prim_type_tag ast_literal_tag_to_prim_type_tag(enum ast_tag tag) {
+    switch (tag) {
+        case AST_INT_LITERAL:    return PRIM_TYPE_INT;
+        case AST_FLOAT_LITERAL:  return PRIM_TYPE_FLOAT;
+        case AST_BOOL_LITERAL:   return PRIM_TYPE_BOOL;
+        case AST_STRING_LITERAL: return PRIM_TYPE_STRING;
+        default:
+            assert(false && "invalid AST literal");
+            return PRIM_TYPE_VOID;
+    }
+}
+
 static inline bool needs_semicolon(const struct ast* stmt) {
     switch (stmt->tag) {
         case AST_VAR_DECL:
@@ -181,6 +232,8 @@ static void print(
             break;
         case AST_NAMED_TYPE:
             fprintf(file, "%s", ast->named_type.name);
+            break;
+        case AST_UNSIZED_DIM:
             break;
         case AST_BOOL_LITERAL:
             fprintf(file, "%s%s%s", styles[STYLE_KEYWORD], ast->bool_literal ? "true" : "false", styles[STYLE_RESET]);

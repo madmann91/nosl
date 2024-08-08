@@ -481,9 +481,15 @@ static struct ast* parse_type(struct parser* parser) {
     }
 }
 
+static struct ast* parse_unsized_dim(struct parser* parser) {
+    return alloc_ast(parser, &parser->prev_end, &(struct ast) { .tag = AST_UNSIZED_DIM });
+}
+
 static struct ast* parse_array_dim(struct parser* parser) {
     if (accept_token(parser, TOKEN_LBRACKET)) {
-        struct ast* dim = parse_expr(parser);
+        struct ast* dim = parser->ahead->tag == TOKEN_RBRACKET
+            ? parse_unsized_dim(parser)
+            : parse_expr(parser);
         expect_token(parser, TOKEN_RBRACKET);
         return dim;
     }

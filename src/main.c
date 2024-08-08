@@ -71,7 +71,7 @@ static bool compile_file(const char* file_name, const struct options* options) {
         });
     }
 
-    check(program, &log);
+    check(&mem_pool, program, &log);
 
     goto done;
 

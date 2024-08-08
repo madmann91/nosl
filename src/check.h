@@ -4,5 +4,6 @@
 
 struct ast;
 struct log;
+struct mem_pool;
 
-void check(struct ast*, struct log*);
+void check(struct mem_pool*, struct ast*, struct log*);

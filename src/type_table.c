@@ -76,10 +76,22 @@ void type_table_destroy(struct type_table* type_table) {
     free(type_table);
 }
 
-static inline struct type* insert_type(struct type_table* type_table, struct type* type) {
+static inline struct type* register_type(struct type_table* type_table, struct type* type) {
     [[maybe_unused]] bool was_inserted = type_set_insert(&type_table->types, (const struct type* const*)&type);
     assert(was_inserted);
     return type;
+}
+
+static const struct type* insert_type(struct type_table* type_table, const struct type* type) {
+    assert(!type_is_nominal(type));
+    const struct type* const* type_ptr = type_set_find(&type_table->types, &type);
+    if (type_ptr)
+        return *type_ptr;
+
+    struct type* new_type = MEM_POOL_ALLOC(type_table->mem_pool, struct type);
+    memcpy(new_type, type, sizeof(struct type));
+    new_type->id = type_table->types.elem_count;
+    return register_type(type_table, new_type);
 }
 
 static inline struct type* create_nominal_type(struct type_table* type_table, enum type_tag tag) {
@@ -88,7 +100,7 @@ static inline struct type* create_nominal_type(struct type_table* type_table, en
     memset(type, 0, sizeof(struct type));
     type->id = type_table->types.elem_count;
     type->tag = tag;
-    return insert_type(type_table, type);
+    return register_type(type_table, type);
 }
 
 struct type* type_table_create_func_type(struct type_table* type_table, size_t param_count) {
@@ -131,22 +143,49 @@ void type_table_finalize_type(struct type_table* type_table, struct type* type) 
         assert(false && "invalid nominal type");
 }
 
-const struct type* type_table_insert_type(struct type_table* type_table, const struct type* type) {
-    assert(!type_is_nominal(type));
-    const struct type* const* type_ptr = type_set_find(&type_table->types, &type);
-    if (type_ptr)
-        return *type_ptr;
-
-    struct type* new_type = MEM_POOL_ALLOC(type_table->mem_pool, struct type);
-    memcpy(new_type, type, sizeof(struct type));
-    new_type->id = type_table->types.elem_count;
-    return insert_type(type_table, new_type);
+const struct type* type_table_get_error_type(struct type_table* type_table) {
+    return insert_type(type_table, &(struct type) { .tag = TYPE_ERROR });
 }
 
 const struct type* type_table_get_prim_type(struct type_table* type_table, enum prim_type_tag tag) {
-    return type_table_insert_type(type_table, &(struct type) { .tag = TYPE_PRIM, .prim_type = tag });
+    return insert_type(type_table, &(struct type) { .tag = TYPE_PRIM, .prim_type = tag });
 }
 
 const struct type* type_table_get_shader_type(struct type_table* type_table, enum shader_type_tag tag) {
-    return type_table_insert_type(type_table, &(struct type) { .tag = TYPE_SHADER, .shader_type = tag });
+    return insert_type(type_table, &(struct type) { .tag = TYPE_SHADER, .shader_type = tag });
+}
+
+const struct type* type_table_get_closure_type(
+    struct type_table* type_table,
+    const struct type* inner_type)
+{
+    return insert_type(type_table, &(struct type) {
+        .tag = TYPE_CLOSURE,
+        .closure_type.inner_type = inner_type
+    });
+}
+
+const struct type* type_table_get_sized_array_type(
+    struct type_table* type_table,
+    const struct type* elem_type,
+    size_t elem_count)
+{
+    assert(elem_count > 0);
+    return insert_type(type_table, &(struct type) {
+        .tag = TYPE_ARRAY,
+        .array_type = {
+            .elem_type = elem_type,
+            .elem_count = elem_count
+        }
+    });
+}
+
+const struct type* type_table_get_unsized_array_type(
+    struct type_table* type_table,
+    const struct type* elem_type)
+{
+    return insert_type(type_table, &(struct type) {
+        .tag = TYPE_ARRAY,
+        .array_type.elem_type = elem_type
+    });
 }
