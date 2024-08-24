@@ -15,6 +15,7 @@ struct styles {
 };
 
 SMALL_VEC_IMPL(small_type_vec, const struct type*, PUBLIC)
+SMALL_VEC_IMPL(small_func_param_vec, struct func_param, PUBLIC)
 
 enum coercion_rank type_coercion_rank(const struct type* from, const struct type* to) {
     if (from == to)
@@ -51,16 +52,8 @@ enum coercion_rank type_coercion_rank(const struct type* from, const struct type
     return COERCION_IMPOSSIBLE;
 }
 
-bool type_tag_is_nominal(enum type_tag tag) {
-    return tag == TYPE_STRUCT || tag == TYPE_FUNC;
-}
-
 bool type_is_unsized_array(const struct type* type) {
     return type->tag == TYPE_ARRAY && type->array_type.elem_count == 0;
-}
-
-bool type_is_nominal(const struct type* type) {
-    return type_tag_is_nominal(type->tag);
 }
 
 bool type_is_prim_type(const struct type* type, enum prim_type_tag tag) {
@@ -128,6 +121,25 @@ size_t type_component_count(const struct type* type) {
         default:
             return 1;
     }
+}
+
+const char* type_constructor_name(const struct type* type) {
+    if (type->tag == TYPE_STRUCT)
+        return type->struct_type.name;
+    if (type->tag == TYPE_PRIM) {
+        switch (type->prim_type) {
+            case PRIM_TYPE_BOOL:   return "bool";
+            case PRIM_TYPE_FLOAT:  return "float";
+            case PRIM_TYPE_INT:    return "int";
+            case PRIM_TYPE_COLOR:  return "color";
+            case PRIM_TYPE_POINT:  return "point";
+            case PRIM_TYPE_VECTOR: return "vector";
+            case PRIM_TYPE_NORMAL: return "normal";
+            case PRIM_TYPE_MATRIX: return "matrix";
+            default:               return NULL;
+        }
+    }
+    return NULL;
 }
 
 static void print(FILE* file, const struct type* type, const struct styles* styles) {

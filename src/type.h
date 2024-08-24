@@ -18,7 +18,6 @@ enum type_tag {
 
 struct func_param {
     const struct type* type;
-    const char* name;
     bool is_output;
 };
 
@@ -42,9 +41,9 @@ struct type {
         } array_type;
         struct {
             const struct type* ret_type;
-            bool has_ellipsis;
-            struct func_param* params;
+            const struct func_param* params;
             size_t param_count;
+            bool has_ellipsis;
         } func_type;
         struct {
             struct struct_field* fields;
@@ -69,12 +68,11 @@ enum coercion_rank {
 };
 
 SMALL_VEC_DECL(small_type_vec, const struct type*, PUBLIC)
+SMALL_VEC_DECL(small_func_param_vec, struct func_param, PUBLIC)
 
 [[nodiscard]] enum coercion_rank type_coercion_rank(const struct type*, const struct type*);
 
-[[nodiscard]] bool type_tag_is_nominal(enum type_tag);
 [[nodiscard]] bool type_is_unsized_array(const struct type*);
-[[nodiscard]] bool type_is_nominal(const struct type*);
 [[nodiscard]] bool type_is_void(const struct type*);
 [[nodiscard]] bool type_is_prim_type(const struct type*, enum prim_type_tag);
 [[nodiscard]] bool type_is_triple(const struct type*);
@@ -83,6 +81,7 @@ SMALL_VEC_DECL(small_type_vec, const struct type*, PUBLIC)
 [[nodiscard]] bool type_is_castable_to(const struct type*, const struct type*);
 [[nodiscard]] bool type_has_same_param_and_ret_types(const struct type*, const struct type*);
 [[nodiscard]] size_t type_component_count(const struct type*);
+[[nodiscard]] const char* type_constructor_name(const struct type*);
 
 struct type_print_options {
     bool disable_colors;

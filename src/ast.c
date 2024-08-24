@@ -46,7 +46,7 @@ const char* prim_type_tag_to_string(enum prim_type_tag tag) {
 
 const char* shader_type_tag_to_string(enum shader_type_tag tag) {
     switch (tag) {
-#define x(name, str) case SHADER_TYPE_##name: return str;
+#define x(name, str, ...) case SHADER_TYPE_##name: return str;
         SHADER_TYPE_LIST(x)
 #undef x
         default:

@@ -1,6 +1,8 @@
 #include "parse.h"
 #include "check.h"
+#include "type_table.h"
 #include "ast.h"
+#include "preamble.h"
 
 #include <overture/cli.h>
 #include <overture/file.h>
@@ -31,7 +33,12 @@ static enum cli_state usage(void*, char*) {
     return CLI_STATE_ERROR;
 }
 
-static bool compile_file(const char* file_name, const struct options* options) {
+static bool compile_file(
+    const char* file_name,
+    struct type_table* type_table,
+    const struct preamble* preamble,
+    const struct options* options)
+{
     size_t file_size = 0;
     char* file_data = file_read(file_name, &file_size);
     if (!file_data) {
@@ -46,6 +53,7 @@ static bool compile_file(const char* file_name, const struct options* options) {
         .max_errors = options->max_errors,
         .print_line = log_print_line
     };
+
     struct mem_pool mem_pool = mem_pool_create();
 
     bool status = true;
@@ -60,7 +68,7 @@ static bool compile_file(const char* file_name, const struct options* options) {
         });
     }
 
-    check(&mem_pool, program, &log);
+    check(&mem_pool, type_table, preamble, program, &log);
 
     goto done;
 
@@ -97,14 +105,22 @@ int main(int argc, char** argv) {
     if (!parse_options(argc, argv, &options))
         return 1;
 
+    struct mem_pool mem_pool = mem_pool_create();
+    struct type_table* type_table = type_table_create(&mem_pool);
+    struct preamble preamble = preamble_build(&mem_pool, type_table);
+
     bool status = true;
     size_t file_count = 0;
     for (int i = 1; i < argc; ++i) {
         if (!argv[i])
             continue;
-        status &= compile_file(argv[i], &options);
+        status &= compile_file(argv[i], type_table, &preamble, &options);
         file_count++;
     }
+
+    type_table_destroy(type_table);
+    mem_pool_destroy(&mem_pool);
+
     if (file_count == 0) {
         fprintf(stderr, "no input files\n");
         return 1;

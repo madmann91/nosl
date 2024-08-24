@@ -2,10 +2,12 @@
 #include "env.h"
 #include "ast.h"
 #include "type_table.h"
+#include "preamble.h"
 
 #include <overture/log.h>
 #include <overture/mem_pool.h>
 #include <overture/mem_stream.h>
+#include <overture/vec.h>
 
 #include <assert.h>
 #include <string.h>
@@ -15,6 +17,7 @@ struct type_checker {
     struct type_print_options type_print_options;
     struct mem_pool* mem_pool;
     struct type_table* type_table;
+    const struct preamble* preamble;
     struct env* env;
     struct log* log;
 };
@@ -135,9 +138,15 @@ static const struct type* check_shader_type(struct type_checker* type_checker, s
     return type_table_get_shader_type(type_checker->type_table, ast->shader_type.tag);
 }
 
-static const struct type* check_named_type(struct type_checker*, struct ast*) {
-    assert(false && "not implemented");
-    return NULL;
+static const struct type* check_named_type(struct type_checker* type_checker, struct ast* ast) {
+    struct ast* symbol = env_find_one_symbol(type_checker->env, ast->named_type.name);
+    if (!symbol) {
+        log_error(type_checker->log, &ast->loc, "unknown identifier '%s'", ast->named_type.name);
+        return ast->type = type_table_get_error_type(type_checker->type_table);
+    }
+    assert(symbol->type);
+    ast->named_type.symbol = symbol;
+    return ast->type = symbol->type;
 }
 
 static const struct type* check_type(struct type_checker* type_checker, struct ast* ast) {
@@ -242,32 +251,31 @@ static inline struct ast* find_conflicting_overload(
 
 static void check_shader_or_func_decl(struct type_checker* type_checker, struct ast* ast) {
     assert(ast->tag == AST_FUNC_DECL || ast->tag == AST_SHADER_DECL);
-    bool is_shader_decl = ast->tag == AST_SHADER_DECL;
-    const char* decl_name = ast_decl_name(ast);
-
     env_push_scope(type_checker->env, ast);
 
+    bool is_shader_decl = ast->tag == AST_SHADER_DECL;
     struct ast* params = is_shader_decl ? ast->shader_decl.params : ast->func_decl.params;
     check_params(type_checker, params);
 
-    size_t param_count = ast_list_size(params);
-    struct type* func_type = type_table_create_func_type(type_checker->type_table, param_count);
-    func_type->func_type.ret_type = check_type(type_checker,
+    const struct type* ret_type = check_type(type_checker,
         is_shader_decl ? ast->shader_decl.type : ast->func_decl.ret_type);
 
-    size_t param_index = 0;
+    struct small_func_param_vec func_params;
+    small_func_param_vec_init(&func_params);
     for (struct ast* param = params; param; param = param->next) {
-        struct func_param* func_param = &func_type->func_type.params[param_index++];
-        func_param->is_output = param->param.is_output;
-        func_param->name = param->param.name;
-        func_param->type = param->type;
+        small_func_param_vec_push(&func_params, &(struct func_param) {
+            .type = param->type,
+            .is_output = param->param.is_output
+        });
     }
-    type_table_finalize_type(type_checker->type_table, func_type);
-    ast->type = func_type;
+    ast->type = type_table_get_func_type(
+        type_checker->type_table, ret_type, func_params.elems, func_params.elem_count, false);
+    small_func_param_vec_destroy(&func_params);
 
     check_block_without_scope(type_checker, ast->func_decl.body);
     env_pop_scope(type_checker->env);
 
+    const char* decl_name = ast_decl_name(ast);
     struct ast* conflicting_overload = find_conflicting_overload(type_checker, decl_name, ast->type);
     if (conflicting_overload) {
         char* type_string = type_to_string(ast->type, &type_checker->type_print_options);
@@ -532,7 +540,7 @@ static struct ast* find_best_candidate(
     return NULL;
 }
 
-static void list_candidates(struct type_checker* type_checker, struct ast* const* candidates, size_t candidate_count) {
+static void print_candidates(struct type_checker* type_checker, struct ast* const* candidates, size_t candidate_count) {
     for (size_t i = 0; i < candidate_count; ++i) {
         char* candidate_type_string = type_to_string(candidates[i]->type, &type_checker->type_print_options);
         log_note(type_checker->log, &candidates[i]->loc, "candidate with type '%s'", candidate_type_string);
@@ -540,21 +548,65 @@ static void list_candidates(struct type_checker* type_checker, struct ast* const
     }
 }
 
-static inline char* arg_types_to_string(struct ast* args, const struct type_print_options* type_print_options) {
+static inline char* call_signature_to_string(
+    const struct type* ret_type,
+    struct ast* args,
+    const struct type_print_options* type_print_options)
+{
     struct mem_stream mem_stream;
     mem_stream_init(&mem_stream);
+    if (ret_type) {
+        type_print(mem_stream.file, ret_type, type_print_options);
+        fputc(' ', mem_stream.file);
+    }
+    fputc('(', mem_stream.file);
     for (struct ast* arg = args; arg; arg = arg->next) {
         type_print(mem_stream.file, arg->type, type_print_options);
         if (arg->next)
             fputs(", ", mem_stream.file);
     }
+    fputc(')', mem_stream.file);
     mem_stream_destroy(&mem_stream);
     return mem_stream.buf;
 }
 
+static struct ast* find_func_from_candidates(
+    struct type_checker* type_checker,
+    const struct file_loc* loc,
+    const char* func_name,
+    struct ast** candidates,
+    size_t candidate_count,
+    const struct type* ret_type,
+    struct ast* args)
+{
+    if (candidate_count > 0 && candidates[0]->type->tag != TYPE_FUNC) {
+        report_invalid_type_with_msg(type_checker, loc, candidates[0]->type, "function");
+        return NULL;
+    }
+
+    size_t viable_count = remove_non_viable_candidates(candidates, candidate_count, args);
+    if (viable_count == 0) {
+        char* call_signature_string = call_signature_to_string(ret_type, args, &type_checker->type_print_options);
+        log_error(type_checker->log, loc, "no viable candidate for call to '%s' with signature '%s'",
+            func_name, call_signature_string);
+        print_candidates(type_checker, candidates, candidate_count);
+        free(call_signature_string);
+        return NULL;
+    } else if (viable_count == 1) {
+        return candidates[0];
+    }
+
+    struct ast* symbol = find_best_candidate(candidates, viable_count, ret_type, args);
+    if (!symbol) {
+        log_error(type_checker->log, loc, "ambiguous call to '%s'", func_name);
+        print_candidates(type_checker, candidates, viable_count);
+    }
+    return symbol;
+}
+
 static struct ast* find_func_with_name(
     struct type_checker* type_checker,
-    struct file_loc* loc,
+    const struct file_loc* loc,
     const char* func_name,
     const struct type* ret_type,
     struct ast* args)
@@ -565,24 +617,9 @@ static struct ast* find_func_with_name(
     struct ast* symbol = NULL;
     if (symbols.elem_count == 0) {
         log_error(type_checker->log, loc, "unknown identifier '%s'", func_name);
-    } else if (symbols.elems[0]->type->tag != TYPE_FUNC) {
-        report_invalid_type_with_msg(type_checker, loc, symbols.elems[0]->type, "function");
     } else {
-        size_t viable_count = remove_non_viable_candidates(symbols.elems, symbols.elem_count, args);
-        if (viable_count == 0) {
-            char* arg_types_string = arg_types_to_string(args, &type_checker->type_print_options);
-            log_error(type_checker->log, loc, "no viable candidate for call to '%s' with signature '(%s)'", func_name, arg_types_string);
-            list_candidates(type_checker, symbols.elems, symbols.elem_count);
-            free(arg_types_string);
-        } else if (viable_count == 1) {
-            symbol = symbols.elems[0];
-        } else {
-            symbol = find_best_candidate(symbols.elems, viable_count, ret_type, args);
-            if (!symbol) {
-                log_error(type_checker->log, loc, "ambiguous call to '%s'", func_name);
-                list_candidates(type_checker, symbols.elems, viable_count);
-            }
-        }
+        symbol = find_func_from_candidates(
+            type_checker, loc, func_name, symbols.elems, symbols.elem_count, ret_type, args);
     }
 
     small_ast_vec_destroy(&symbols);
@@ -610,11 +647,10 @@ static const struct type* check_callee(
 }
 
 static inline bool check_call_args(struct type_checker* type_checker, struct ast* args) {
-    for (struct ast* arg = args; arg; arg = arg->next) {
-        if (check_expr(type_checker, arg, NULL)->tag == TYPE_ERROR)
-            return false;
-    }
-    return true;
+    bool success = true;
+    for (struct ast* arg = args; arg; arg = arg->next)
+        success &= check_expr(type_checker, arg, NULL)->tag != TYPE_ERROR;
+    return success;
 }
 
 static const struct type* check_call_expr(
@@ -640,6 +676,12 @@ static const struct type* check_call_expr(
     return coerce_expr(type_checker, ast, expected_type);
 }
 
+static inline const struct type* find_func_ret_type(struct ast* symbol) {
+    assert(symbol->type);
+    assert(symbol->type->tag == TYPE_FUNC);
+    return symbol->type->func_type.ret_type;
+}
+
 static const struct type* check_binary_expr(
     struct type_checker* type_checker,
     struct ast* ast,
@@ -650,13 +692,16 @@ static const struct type* check_binary_expr(
     if (binary_expr_tag_is_logic(ast->binary_expr.tag))
         return check_logic_expr(type_checker, ast, expected_type);
 
-    check_expr(type_checker, ast->binary_expr.args, NULL);
-    check_expr(type_checker, ast->binary_expr.args->next, NULL);
+    if (!check_call_args(type_checker, ast->binary_expr.args))
+        return ast->type = type_table_get_error_type(type_checker->type_table);
 
     const char* func_name = binary_expr_tag_to_func_name(ast->binary_expr.tag);
     struct ast* symbol = find_func_with_name(type_checker, &ast->loc, func_name, expected_type, ast->binary_expr.args);
     if (!symbol)
         return ast->type = type_table_get_error_type(type_checker->type_table);
+
+    ast->unary_expr.symbol = symbol;
+    ast->type = find_func_ret_type(symbol);
 
     if (binary_expr_tag_is_assign(ast->binary_expr.tag))
         expect_mutable(type_checker, ast->binary_expr.args);
@@ -668,22 +713,17 @@ static const struct type* check_unary_expr(
     struct ast* ast,
     const struct type* expected_type)
 {
-    check_expr(type_checker, ast->unary_expr.arg, NULL);
+    if (!check_call_args(type_checker, ast->unary_expr.arg))
+        return ast->type = type_table_get_error_type(type_checker->type_table);
 
     const char* func_name = unary_expr_tag_to_func_name(ast->unary_expr.tag);
     struct ast* symbol = find_func_with_name(type_checker, &ast->loc, func_name, expected_type, ast->unary_expr.arg);
     if (!symbol)
         return ast->type = type_table_get_error_type(type_checker->type_table);
 
-    return coerce_expr(type_checker, ast, expected_type);
-}
+    ast->unary_expr.symbol = symbol;
+    ast->type = find_func_ret_type(symbol);
 
-static const struct type* check_construct_expr(
-    struct type_checker* type_checker,
-    struct ast* ast,
-    const struct type* expected_type)
-{
-    ast->type = check_type(type_checker, ast->construct_expr.type);
     return coerce_expr(type_checker, ast, expected_type);
 }
 
@@ -692,8 +732,79 @@ static const struct type* check_compound_expr(
     struct ast* ast,
     const struct type* expected_type)
 {
-    // TODO
-    return ast->type = type_table_get_error_type(type_checker->type_table);
+    struct ast* last = NULL;
+    for (struct ast* elem = ast->compound_expr.elems; elem; last = elem, elem = elem->next)
+        check_expr(type_checker, elem, ast->next ? NULL : expected_type);
+    assert(last);
+    return ast->type = last->type;
+}
+
+static const struct type* check_array_init(
+    struct type_checker* type_checker,
+    struct ast* elems,
+    const struct type* elem_type)
+{
+    size_t elem_count = 0;
+    for (struct ast* elem = elems; elem; elem = elem->next, elem_count++)
+        check_expr(type_checker, elem, elem_type);
+    return type_table_get_sized_array_type(type_checker->type_table, elem_type, elem_count);
+}
+
+static void check_struct_init(
+    struct type_checker* type_checker,
+    const struct file_loc* loc,
+    struct ast* fields,
+    const struct type* expected_type)
+{
+    assert(expected_type->tag == TYPE_STRUCT);
+    const size_t elem_count = ast_list_size(fields);
+    if (elem_count > expected_type->struct_type.field_count) {
+        char* type_string = type_to_string(expected_type, &type_checker->type_print_options);
+        log_error(type_checker->log, loc, "expected %zu initializers for type '%s', but got %zu",
+            expected_type->struct_type.field_count, type_string, elem_count);
+        free(type_string);
+    } else if (elem_count < expected_type->struct_type.field_count) {
+        // Only report one missing field, to avoid bloating the log
+        const char* missing_field_name = expected_type->struct_type.fields[elem_count].name;
+        log_warn(type_checker->log, loc, "missing initializer for field '%s'", missing_field_name);
+    }
+
+    size_t field_index = 0;
+    for (struct ast* field = fields; field; field = field->next, field_index++) {
+        const struct type* field_type = field_index < expected_type->struct_type.field_count
+            ? expected_type->struct_type.fields[field_index].type : NULL;
+        check_expr(type_checker, field, field_type);
+    }
+}
+
+static const struct type* check_constructor_call(
+    struct type_checker* type_checker,
+    const struct file_loc* loc,
+    const struct type* type,
+    struct ast* args)
+{
+    if (type->tag == TYPE_STRUCT) {
+        check_struct_init(type_checker, loc, args, type);
+        return type;
+    } else if (type->tag == TYPE_PRIM) {
+        if (!check_call_args(type_checker, args))
+            return type_table_get_error_type(type_checker->type_table);
+
+        struct small_ast_vec candidates;
+        small_ast_vec_init(&candidates);
+        small_ast_vec_resize(&candidates, type_checker->preamble->constructor_count[type->prim_type]);
+        xmemcpy(candidates.elems, type_checker->preamble->constructors[type->prim_type], sizeof(struct ast*) * candidates.elem_count);
+        struct ast* symbol = find_func_from_candidates(
+            type_checker, loc, prim_type_tag_to_string(type->prim_type), candidates.elems, candidates.elem_count, type, args);
+        small_ast_vec_destroy(&candidates);
+        if (!symbol)
+            return type_table_get_error_type(type_checker->type_table);
+
+        return find_func_ret_type(symbol);
+    } else {
+        report_invalid_type_with_msg(type_checker, loc, type, "constructible");
+        return type_table_get_error_type(type_checker->type_table);
+    }
 }
 
 static const struct type* check_compound_init(
@@ -701,26 +812,32 @@ static const struct type* check_compound_init(
     struct ast* ast,
     const struct type* expected_type)
 {
-    if (expected_type) {
-        if (expected_type->tag == TYPE_ARRAY)  {
-            assert(expected_type->tag == TYPE_ARRAY);
-            size_t arg_count = 0;
-            for (struct ast* elem = ast->compound_init.elems; elem; elem = elem->next, arg_count++)
-                check_expr(type_checker, elem, expected_type->array_type.elem_type);
-            return ast->type = type_table_get_sized_array_type(type_checker->type_table,
-                expected_type->array_type.elem_type, arg_count);
-        } else if (expected_type->tag == TYPE_PRIM) {
-            // TODO
-            return ast->type = type_table_get_error_type(type_checker->type_table);
-        } else if (expected_type->tag == TYPE_STRUCT) {
-            // TODO
-            return ast->type = type_table_get_error_type(type_checker->type_table);
-        }
+    if (!expected_type) {
+        log_error(type_checker->log, &ast->loc,
+            "compound initializers are only allowed where a structure, vector, point, normal, color, matrix, or array type is required");
+        return ast->type = type_table_get_error_type(type_checker->type_table);
     }
 
-    log_error(type_checker->log, &ast->loc,
-        "compound initializers are only allowed where a structure, vector, point, normal, color, matrix, or array type is required");
-    return ast->type = type_table_get_error_type(type_checker->type_table);
+    if (expected_type->tag == TYPE_ARRAY)  {
+        ast->type = check_array_init(type_checker, ast->compound_init.elems, expected_type->array_type.elem_type);
+        return coerce_expr(type_checker, ast, expected_type);
+    } else if (expected_type->tag == TYPE_STRUCT || expected_type->tag == TYPE_PRIM) {
+        ast->type = check_constructor_call(type_checker, &ast->loc, expected_type, ast->compound_init.elems);
+        return coerce_expr(type_checker, ast, expected_type);
+    } else {
+        report_invalid_type_with_msg(type_checker, &ast->loc, expected_type, "compound-initializable");
+        return ast->type = type_table_get_error_type(type_checker->type_table);
+    }
+}
+
+static const struct type* check_construct_expr(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* expected_type)
+{
+    const struct type* type = check_type(type_checker, ast->construct_expr.type);
+    ast->type = check_constructor_call(type_checker, &ast->loc, type, ast->construct_expr.args);
+    return coerce_expr(type_checker, ast, expected_type);
 }
 
 static const struct type* check_ternary_expr(
@@ -784,17 +901,23 @@ static const struct type* check_proj_expr(
     if (type_is_triple(value_type)) {
         const char* component_names = value_type->prim_type == PRIM_TYPE_COLOR ? "rgb" : "xyz";
         if (ast->proj_expr.elem[0] != 0 && ast->proj_expr.elem[1] == 0) {
-            for (size_t index = 0; index < 3; ++index) {
-                if (ast->proj_expr.elem[0] == component_names[index]) {
+            for (size_t i = 0; i < 3; ++i) {
+                if (ast->proj_expr.elem[0] == component_names[i]) {
                     ast->type = type_table_get_prim_type(type_checker->type_table, PRIM_TYPE_FLOAT);
-                    ast->proj_expr.index = index;
+                    ast->proj_expr.index = i;
                     break;
                 }
             }
         }
+    } else if (value_type->tag == TYPE_STRUCT) {
+        for (size_t i = 0; i < value_type->struct_type.field_count; ++i) {
+            if (!strcmp(value_type->struct_type.fields[i].name, ast->proj_expr.elem)) {
+                ast->type = value_type->struct_type.fields[i].type;
+                ast->proj_expr.index = i;
+                break;
+            }
+        }
     }
-
-    // TODO: Structures
 
     if (!ast->type) {
         ast->type = type_table_get_error_type(type_checker->type_table);
@@ -863,6 +986,7 @@ static void check_struct_decl(struct type_checker* type_checker, struct ast* ast
     insert_symbol(type_checker, ast->struct_decl.name, ast, false);
     env_push_scope(type_checker->env, ast);
     struct type* struct_type = type_table_create_struct_type(type_checker->type_table, ast_field_count(ast));
+    struct_type->struct_type.name = ast->struct_decl.name;
     size_t field_index = 0;
     for (struct ast* field = ast->struct_decl.fields; field; field = field->next) {
         assert(field->tag == AST_VAR_DECL);
@@ -871,9 +995,13 @@ static void check_struct_decl(struct type_checker* type_checker, struct ast* ast
             struct struct_field* struct_field = &struct_type->struct_type.fields[field_index++];
             check_var(type_checker, var, field_type);
             struct_field->name = var->var.name;
+            struct_field->type = var->type;
         }
     }
+    assert(field_index == ast_field_count(ast));
+    type_table_finalize_struct_type(type_checker->type_table, struct_type);
     env_pop_scope(type_checker->env);
+    ast->type = struct_type;
 }
 
 static void check_top_level_decl(struct type_checker* type_checker, struct ast* ast) {
@@ -891,16 +1019,22 @@ static void check_top_level_decl(struct type_checker* type_checker, struct ast* 
     }
 }
 
-void check(struct mem_pool* mem_pool, struct ast* ast, struct log* log) {
+void check(
+    struct mem_pool* mem_pool,
+    struct type_table* type_table,
+    const struct preamble* preamble,
+    struct ast* ast,
+    struct log* log)
+{
     struct type_checker type_checker = {
         .type_print_options.disable_colors = log->disable_colors,
         .mem_pool = mem_pool,
-        .type_table = type_table_create(mem_pool),
+        .type_table = type_table,
+        .preamble = preamble,
         .env = env_create(),
         .log = log
     };
     for (; ast; ast = ast->next)
         check_top_level_decl(&type_checker, ast);
     env_destroy(type_checker.env);
-    type_table_destroy(type_checker.type_table);
 }

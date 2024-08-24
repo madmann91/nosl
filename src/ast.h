@@ -94,6 +94,7 @@ enum shader_type_tag {
 enum ast_tag {
     AST_ERROR,
     AST_METADATUM,
+    AST_BUILTIN,
 
     // Types
     AST_PRIM_TYPE,
@@ -206,10 +207,12 @@ struct ast {
         struct {
             enum binary_expr_tag tag;
             struct ast* args;
+            struct ast* symbol;
         } binary_expr;
         struct {
             enum unary_expr_tag tag;
             struct ast* arg;
+            struct ast* symbol;
         } unary_expr;
         struct {
             struct ast* callee;
@@ -218,11 +221,14 @@ struct ast {
         struct {
             struct ast* type;
             struct ast* args;
-            bool has_space;
         } construct_expr;
         struct {
             struct ast* elems;
-        } compound_expr, compound_init;
+        } compound_expr;
+        struct {
+            struct ast* elems;
+            struct ast* symbol;
+        } compound_init;
         struct {
             struct ast* inner_expr;
         } paren_expr;
