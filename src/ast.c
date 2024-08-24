@@ -46,7 +46,7 @@ const char* prim_type_tag_to_string(enum prim_type_tag tag) {
 
 const char* shader_type_tag_to_string(enum shader_type_tag tag) {
     switch (tag) {
-#define x(name, str, ...) case SHADER_TYPE_##name: return str;
+#define x(name, str) case SHADER_TYPE_##name: return str;
         SHADER_TYPE_LIST(x)
 #undef x
         default:
@@ -68,7 +68,7 @@ const char* binary_expr_tag_to_string(enum binary_expr_tag tag) {
 
 const char* unary_expr_tag_to_string(enum unary_expr_tag tag) {
     switch (tag) {
-#define x(name, str, ...) case UNARY_EXPR_##name: return str;
+#define x(name, str) case UNARY_EXPR_##name: return str;
         UNARY_EXPR_LIST(x)
 #undef x
         default:
