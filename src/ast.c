@@ -6,18 +6,17 @@
 #include <inttypes.h>
 #include <assert.h>
 
-enum styles {
-    STYLE_RESET,
-    STYLE_ERROR,
-    STYLE_KEYWORD,
-    STYLE_LITERAL,
-    STYLE_COMMENT,
-    STYLE_COUNT
+struct styles {
+    const char* reset;
+    const char* error;
+    const char* keyword;
+    const char* literal;
+    const char* comment;
 };
 
 SMALL_VEC_IMPL(small_ast_vec, struct ast*, PUBLIC)
 
-static void print(FILE*, size_t, const struct ast*, const char* [STYLE_COUNT]);
+static void print(FILE*, size_t, const struct ast*, const struct styles*);
 
 bool unary_expr_tag_is_postfix(enum unary_expr_tag tag) {
     return tag == UNARY_EXPR_POST_INC || tag == UNARY_EXPR_POST_DEC;
@@ -78,6 +77,45 @@ const char* unary_expr_tag_to_string(enum unary_expr_tag tag) {
     }
 }
 
+const char* binary_expr_tag_to_func_name(enum binary_expr_tag tag) {
+    switch (binary_expr_tag_remove_assign(tag)) {
+        case BINARY_EXPR_MUL:     return "__operator__mul__";
+        case BINARY_EXPR_DIV:     return "__operator__div__";
+        case BINARY_EXPR_REM:     return "__operator__mod__";
+        case BINARY_EXPR_ADD:     return "__operator__add__";
+        case BINARY_EXPR_SUB:     return "__operator__sub__";
+        case BINARY_EXPR_LSHIFT:  return "__operator__shl__";
+        case BINARY_EXPR_RSHIFT:  return "__operator__shr__";
+        case BINARY_EXPR_CMP_LT:  return "__operator__lt__";
+        case BINARY_EXPR_CMP_LE:  return "__operator__le__";
+        case BINARY_EXPR_CMP_GT:  return "__operator__gt__";
+        case BINARY_EXPR_CMP_GE:  return "__operator__ge__";
+        case BINARY_EXPR_CMP_NE:  return "__operator__ne__";
+        case BINARY_EXPR_CMP_EQ:  return "__operator__eq__";
+        case BINARY_EXPR_BIT_AND: return "__operator__bitand__";
+        case BINARY_EXPR_BIT_XOR: return "__operator__xor__";
+        case BINARY_EXPR_BIT_OR:  return "__operator__bitor__";
+        default:
+            assert(false && "non-overloadable binary operator");
+            return "";
+    }
+}
+
+const char* unary_expr_tag_to_func_name(enum unary_expr_tag tag) {
+    switch (tag) {
+        case UNARY_EXPR_PRE_INC:  return "__operator__pre_inc__";
+        case UNARY_EXPR_PRE_DEC:  return "__operator__pre_dec__";
+        case UNARY_EXPR_POST_INC: return "__operator__post_inc__";
+        case UNARY_EXPR_POST_DEC: return "__operator__post_dec__";
+        case UNARY_EXPR_NEG:      return "__operator__neg__";
+        case UNARY_EXPR_BIT_NOT:  return "__operator__compl__";
+        case UNARY_EXPR_NOT:      return "__operator__not__";
+        default:
+            assert(false && "invalid unary expression");
+            return "";
+    }
+}
+
 enum binary_expr_tag binary_expr_tag_remove_assign(enum binary_expr_tag tag) {
     switch (tag) {
         case BINARY_EXPR_ASSIGN_MUL:     return BINARY_EXPR_MUL;
@@ -103,6 +141,10 @@ bool binary_expr_tag_is_assign(enum binary_expr_tag tag) {
         default:
             return false;
     }
+}
+
+bool binary_expr_tag_is_logic(enum binary_expr_tag tag) {
+    return tag == BINARY_EXPR_LOGIC_AND || tag == BINARY_EXPR_LOGIC_OR;
 }
 
 bool unary_expr_tag_is_inc_or_dec(enum unary_expr_tag tag) {
@@ -161,7 +203,7 @@ static void print_many(
     const char* sep,
     const char* end,
     const struct ast* ast,
-    const char* styles[STYLE_COUNT])
+    const struct styles* styles)
 {
     fputs(beg, file);
     for (; ast; ast = ast->next) {
@@ -176,7 +218,7 @@ static void print_paren(
     FILE* file,
     size_t indent,
     const struct ast* ast,
-    const char* styles[STYLE_COUNT])
+    const struct styles* styles)
 {
     fputs("(", file);
     print(file, indent, ast, styles);
@@ -187,7 +229,7 @@ static void print_dim(
     FILE* file,
     size_t indent,
     const struct ast* ast,
-    const char* styles[STYLE_COUNT])
+    const struct styles* styles)
 {
     if (ast) {
         fputs("[", file);
@@ -200,7 +242,7 @@ static void print_stmt(
     FILE* file,
     size_t indent,
     const struct ast* ast,
-    const char* styles[STYLE_COUNT])
+    const struct styles* styles)
 {
     print(file, indent, ast, styles);
     if (needs_semicolon(ast))
@@ -211,11 +253,11 @@ static void print(
     FILE* file,
     size_t indent,
     const struct ast* ast,
-    const char* styles[STYLE_COUNT])
+    const struct styles* styles)
 {
     switch (ast->tag) {
         case AST_ERROR:
-            fprintf(file, "%s<error>%s", styles[STYLE_ERROR], styles[STYLE_RESET]);
+            fprintf(file, "%s<error>%s", styles->error, styles->reset);
             break;
         case AST_METADATUM:
             print(file, indent, ast->metadatum.type, styles);
@@ -224,11 +266,11 @@ static void print(
             break;
         case AST_PRIM_TYPE:
             if (ast->prim_type.is_closure)
-                fprintf(file, "%sclosure%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
-            fprintf(file, "%s%s%s", styles[STYLE_KEYWORD], prim_type_tag_to_string(ast->prim_type.tag), styles[STYLE_RESET]);
+                fprintf(file, "%sclosure%s ", styles->keyword, styles->reset);
+            fprintf(file, "%s%s%s", styles->keyword, prim_type_tag_to_string(ast->prim_type.tag), styles->reset);
             break;
         case AST_SHADER_TYPE:
-            fprintf(file, "%s%s%s", styles[STYLE_KEYWORD], shader_type_tag_to_string(ast->shader_type.tag), styles[STYLE_RESET]);
+            fprintf(file, "%s%s%s", styles->keyword, shader_type_tag_to_string(ast->shader_type.tag), styles->reset);
             break;
         case AST_NAMED_TYPE:
             fprintf(file, "%s", ast->named_type.name);
@@ -236,16 +278,16 @@ static void print(
         case AST_UNSIZED_DIM:
             break;
         case AST_BOOL_LITERAL:
-            fprintf(file, "%s%s%s", styles[STYLE_KEYWORD], ast->bool_literal ? "true" : "false", styles[STYLE_RESET]);
+            fprintf(file, "%s%s%s", styles->keyword, ast->bool_literal ? "true" : "false", styles->reset);
             break;
         case AST_INT_LITERAL:
-            fprintf(file, "%s%"PRIuMAX"%s", styles[STYLE_LITERAL], ast->int_literal, styles[STYLE_RESET]);
+            fprintf(file, "%s%"PRIuMAX"%s", styles->literal, ast->int_literal, styles->reset);
             break;
         case AST_FLOAT_LITERAL:
-            fprintf(file, "%s%f%s", styles[STYLE_LITERAL], ast->float_literal, styles[STYLE_RESET]);
+            fprintf(file, "%s%f%s", styles->literal, ast->float_literal, styles->reset);
             break;
         case AST_STRING_LITERAL:
-            fprintf(file, "%s\"%s\"%s", styles[STYLE_LITERAL], ast->string_literal, styles[STYLE_RESET]);
+            fprintf(file, "%s\"%s\"%s", styles->literal, ast->string_literal, styles->reset);
             break;
         case AST_SHADER_DECL:
             print(file, indent, ast->shader_decl.type, styles);
@@ -262,7 +304,7 @@ static void print(
             print(file, indent, ast->func_decl.body, styles);
             break;
         case AST_STRUCT_DECL:
-            fprintf(file, "%sstruct%s %s {", styles[STYLE_KEYWORD], styles[STYLE_RESET], ast->struct_decl.name);
+            fprintf(file, "%sstruct%s %s {", styles->keyword, styles->reset, ast->struct_decl.name);
             for (struct ast* field = ast->struct_decl.fields; field; field = field->next) {
                 print_new_line(file, indent + 1);
                 print(file, indent + 1, field, styles);
@@ -285,7 +327,7 @@ static void print(
             break;
         case AST_PARAM:
             if (ast->param.is_output)
-                fprintf(file, "%soutput%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
+                fprintf(file, "%soutput%s ", styles->keyword, styles->reset);
             print(file, indent, ast->param.type, styles);
             fprintf(file, " %s", ast->param.name);
             print_dim(file, indent, ast->param.dim, styles);
@@ -300,9 +342,9 @@ static void print(
             fputs(ast->ident_expr.name, file);
             break;
         case AST_BINARY_EXPR: {
-            print(file, indent, ast->binary_expr.left, styles);
+            print(file, indent, ast->binary_expr.args, styles);
             fprintf(file, " %s ", binary_expr_tag_to_string(ast->binary_expr.tag));
-            print(file, indent, ast->binary_expr.right, styles);
+            print(file, indent, ast->binary_expr.args->next, styles);
             break;
         }
         case AST_UNARY_EXPR: {
@@ -365,13 +407,13 @@ static void print(
             fputs("}", file);
             break;
         case AST_WHILE_LOOP:
-            fprintf(file, "%swhile%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
+            fprintf(file, "%swhile%s ", styles->keyword, styles->reset);
             print_paren(file, indent, ast->while_loop.cond, styles);
             fputs(" ", file);
             print_stmt(file, indent, ast->while_loop.body, styles);
             break;
         case AST_FOR_LOOP:
-            fprintf(file, "%sfor%s (", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
+            fprintf(file, "%sfor%s (", styles->keyword, styles->reset);
             if (ast->for_loop.init)
                 print_stmt(file, indent, ast->for_loop.init, styles);
             else
@@ -386,31 +428,31 @@ static void print(
             print_stmt(file, indent, ast->for_loop.body, styles);
             break;
         case AST_DO_WHILE_LOOP:
-            fprintf(file, "%sdo%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
+            fprintf(file, "%sdo%s ", styles->keyword, styles->reset);
             print_stmt(file, indent, ast->do_while_loop.body, styles);
             fputs(" ", file);
-            fprintf(file, "%swhile%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
+            fprintf(file, "%swhile%s ", styles->keyword, styles->reset);
             print_paren(file, indent, ast->do_while_loop.cond, styles);
             fputs(";", file);
             break;
         case AST_IF_STMT:
-            fprintf(file, "%sif%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
+            fprintf(file, "%sif%s ", styles->keyword, styles->reset);
             print_paren(file, indent, ast->if_stmt.cond, styles);
             fputs(" ", file);
             print_stmt(file, indent, ast->if_stmt.then_stmt, styles);
             if (ast->if_stmt.else_stmt) {
-                fprintf(file, " %selse%s ", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
+                fprintf(file, " %selse%s ", styles->keyword, styles->reset);
                 print_stmt(file, indent, ast->if_stmt.else_stmt, styles);
             }
             break;
         case AST_BREAK_STMT:
-            fprintf(file, "%sbreak%s;", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
+            fprintf(file, "%sbreak%s;", styles->keyword, styles->reset);
             break;
         case AST_CONTINUE_STMT:
-            fprintf(file, "%scontinue%s;", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
+            fprintf(file, "%scontinue%s;", styles->keyword, styles->reset);
             break;
         case AST_RETURN_STMT:
-            fprintf(file, "%sreturn%s", styles[STYLE_KEYWORD], styles[STYLE_RESET]);
+            fprintf(file, "%sreturn%s", styles->keyword, styles->reset);
             if (ast->return_stmt.value) {
                 fputs(" ", file);
                 print(file, indent, ast->return_stmt.value, styles);
@@ -427,15 +469,15 @@ static void print(
 }
 
 void ast_print(FILE* file, const struct ast* ast, const struct ast_print_options* options) {
-    const char* styles[STYLE_COUNT] = {
-        [STYLE_RESET]   = options->disable_colors ? "" : TERM1(TERM_RESET),
-        [STYLE_COMMENT] = options->disable_colors ? "" : TERM1(TERM_FG_GREEN),
-        [STYLE_KEYWORD] = options->disable_colors ? "" : TERM2(TERM_FG_BLUE, TERM_BOLD),
-        [STYLE_LITERAL] = options->disable_colors ? "" : TERM1(TERM_FG_CYAN),
-        [STYLE_ERROR]   = options->disable_colors ? "" : TERM2(TERM_FG_RED, TERM_BOLD),
+    struct styles styles = {
+        .reset   = options->disable_colors ? "" : TERM1(TERM_RESET),
+        .comment = options->disable_colors ? "" : TERM1(TERM_FG_GREEN),
+        .keyword = options->disable_colors ? "" : TERM2(TERM_FG_BLUE, TERM_BOLD),
+        .literal = options->disable_colors ? "" : TERM1(TERM_FG_CYAN),
+        .error   = options->disable_colors ? "" : TERM2(TERM_FG_RED, TERM_BOLD),
     };
     for (const struct ast* decl = ast; decl; decl = decl->next) {
-        print(file, options->indent, decl, styles);
+        print(file, options->indent, decl, &styles);
         print_new_line(file, options->indent);
     }
 }
@@ -446,6 +488,23 @@ void ast_dump(const struct ast* ast) {
     });
     fputs("\n", stdout);
     fflush(stdout);
+}
+
+bool ast_is_mutable(const struct ast* ast) {
+    switch (ast->tag) {
+        case AST_PARAM:
+            return ast->param.is_output;
+        case AST_VAR:
+            return true;
+        case AST_IDENT_EXPR:
+            return ast->ident_expr.symbol && ast_is_mutable(ast->ident_expr.symbol);
+        case AST_INDEX_EXPR:
+            return ast_is_mutable(ast->index_expr.value);
+        case AST_PROJ_EXPR:
+            return ast_is_mutable(ast->proj_expr.value);
+        default:
+            return false;
+    }
 }
 
 size_t ast_list_size(const struct ast* ast) {
@@ -472,4 +531,10 @@ const char* ast_decl_name(const struct ast* ast) {
         case AST_SHADER_DECL: return ast->shader_decl.name;
         default:              return "";
     }
+}
+
+struct ast* ast_skip_parens(struct ast* ast) {
+    while (ast->tag == AST_PAREN_EXPR)
+        ast = ast->paren_expr.inner_expr;
+    return ast;
 }

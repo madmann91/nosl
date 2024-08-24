@@ -8,6 +8,7 @@
 #include <overture/mem.h>
 
 #include <assert.h>
+#include <string.h>
 
 static inline uint32_t hash_type(uint32_t h, const struct type* const* type_ptr) {
     const struct type* type = *type_ptr;
@@ -57,22 +58,21 @@ SET_DEFINE(type_set, const struct type*, hash_type, is_type_equal, PRIVATE)
 
 struct type_table {
     struct type_set types;
+    struct mem_pool* mem_pool;
     struct str_pool* str_pool;
-    struct mem_pool mem_pool;
 };
 
-struct type_table* type_table_create(void) {
+struct type_table* type_table_create(struct mem_pool* mem_pool) {
     struct type_table* type_table = xmalloc(sizeof(struct type_table));
     type_table->types = type_set_create();
-    type_table->str_pool = str_pool_create();
-    type_table->mem_pool = mem_pool_create();
+    type_table->mem_pool = mem_pool;
+    type_table->str_pool = str_pool_create(mem_pool);
     return type_table;
 }
 
 void type_table_destroy(struct type_table* type_table) {
     type_set_destroy(&type_table->types);
     str_pool_destroy(type_table->str_pool);
-    mem_pool_destroy(&type_table->mem_pool);
     free(type_table);
 }
 
@@ -88,7 +88,7 @@ static const struct type* insert_type(struct type_table* type_table, const struc
     if (type_ptr)
         return *type_ptr;
 
-    struct type* new_type = MEM_POOL_ALLOC(type_table->mem_pool, struct type);
+    struct type* new_type = MEM_POOL_ALLOC(*type_table->mem_pool, struct type);
     memcpy(new_type, type, sizeof(struct type));
     new_type->id = type_table->types.elem_count;
     return register_type(type_table, new_type);
@@ -96,7 +96,7 @@ static const struct type* insert_type(struct type_table* type_table, const struc
 
 static inline struct type* create_nominal_type(struct type_table* type_table, enum type_tag tag) {
     assert(type_tag_is_nominal(tag));
-    struct type* type = mem_pool_alloc(&type_table->mem_pool, sizeof(struct type), alignof(struct type));
+    struct type* type = mem_pool_alloc(type_table->mem_pool, sizeof(struct type), alignof(struct type));
     memset(type, 0, sizeof(struct type));
     type->id = type_table->types.elem_count;
     type->tag = tag;
@@ -105,7 +105,7 @@ static inline struct type* create_nominal_type(struct type_table* type_table, en
 
 struct type* type_table_create_func_type(struct type_table* type_table, size_t param_count) {
     struct type* type = create_nominal_type(type_table, TYPE_FUNC);
-    type->func_type.params = mem_pool_alloc(&type_table->mem_pool,
+    type->func_type.params = mem_pool_alloc(type_table->mem_pool,
         sizeof(struct func_param) * param_count,
         alignof(struct func_param));
     type->func_type.param_count = param_count;
@@ -114,7 +114,7 @@ struct type* type_table_create_func_type(struct type_table* type_table, size_t p
 
 struct type* type_table_create_struct_type(struct type_table* type_table, size_t field_count) {
     struct type* type = create_nominal_type(type_table, TYPE_STRUCT);
-    type->struct_type.fields = mem_pool_alloc(&type_table->mem_pool,
+    type->struct_type.fields = mem_pool_alloc(type_table->mem_pool,
         sizeof(struct struct_field) * type->struct_type.field_count,
         alignof(struct struct_field));
     type->struct_type.field_count = field_count;

@@ -3,8 +3,9 @@
 #include "type.h"
 
 struct type_table;
+struct mem_pool;
 
-[[nodiscard]] struct type_table* type_table_create(void);
+[[nodiscard]] struct type_table* type_table_create(struct mem_pool*);
 void type_table_destroy(struct type_table*);
 
 [[nodiscard]] struct type* type_table_create_func_type(struct type_table*, size_t param_count);

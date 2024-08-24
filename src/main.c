@@ -31,13 +31,6 @@ static enum cli_state usage(void*, char*) {
     return CLI_STATE_ERROR;
 }
 
-static inline void replace_tabs(char* text, size_t length) {
-    for (size_t i = 0; i < length; ++i) {
-        if (text[i] == '\t')
-            text[i] = ' ';
-    }
-}
-
 static bool compile_file(const char* file_name, const struct options* options) {
     size_t file_size = 0;
     char* file_data = file_read(file_name, &file_size);
@@ -46,22 +39,18 @@ static bool compile_file(const char* file_name, const struct options* options) {
         return false;
     }
 
-    // Necessary to make log message diagnostics align with the underlined text.
-    replace_tabs(file_data, file_size);
-
     struct log log = {
         .file = stderr,
         .disable_colors = options->disable_colors || !is_term(stderr),
         .max_warns = options->max_warns,
         .max_errors = options->max_errors,
-        .source_name = file_name,
-        .source_data = (struct str_view) { .data = file_data, .length = file_size }
+        .print_line = log_print_line
     };
     struct mem_pool mem_pool = mem_pool_create();
 
     bool status = true;
 
-    struct ast* program = parse(&mem_pool, file_data, file_size, &log);
+    struct ast* program = parse(&mem_pool, file_name, file_data, file_size, &log);
     if (log.error_count != 0)
         goto error;
 

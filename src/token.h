@@ -111,7 +111,7 @@ typedef double float_literal;
 
 struct token {
     enum token_tag tag;
-    struct source_range source_range;
+    struct file_loc loc;
     union {
         int_literal int_literal;
         float_literal float_literal;

@@ -24,7 +24,7 @@ static struct ast* parse_expr(struct parser*);
 static struct ast* parse_stmt(struct parser*);
 
 static inline void next_token(struct parser* parser) {
-    parser->prev_end = parser->ahead->source_range.end;
+    parser->prev_end = parser->ahead->loc.end;
     for (size_t i = 1; i < TOKEN_LOOKAHEAD; ++i)
         parser->ahead[i - 1] = parser->ahead[i];
     parser->ahead[TOKEN_LOOKAHEAD - 1] = lexer_advance(&parser->lexer);
@@ -47,7 +47,7 @@ static inline bool expect_token(struct parser* parser, enum token_tag tag) {
     if (!accept_token(parser, tag)) {
         struct str_view str_view = token_str_view(parser->lexer.data, parser->ahead);
         log_error(parser->lexer.log,
-            &parser->ahead->source_range,
+            &parser->ahead->loc,
             "expected '%s', but got '%.*s'",
             token_tag_to_string(tag),
             (int)str_view.length, str_view.data);
@@ -63,8 +63,9 @@ static inline struct ast* alloc_ast(
 {
     struct ast* copy = MEM_POOL_ALLOC(*parser->mem_pool, struct ast);
     memcpy(copy, ast, sizeof(struct ast));
-    copy->source_range.begin = *begin_pos;
-    copy->source_range.end = parser->prev_end;
+    copy->loc.file_name = parser->lexer.file_name;
+    copy->loc.begin = *begin_pos;
+    copy->loc.end = parser->prev_end;
     return copy;
 }
 
@@ -96,10 +97,10 @@ static struct ast* parse_many(
 }
 
 static struct ast* parse_error(struct parser* parser, const char* msg) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     struct str_view str_view = token_str_view(parser->lexer.data, parser->ahead);
     log_error(parser->lexer.log,
-        &parser->ahead->source_range,
+        &parser->ahead->loc,
         "expected %s, but got '%.*s'",
         msg, (int)str_view.length, str_view.data);
     next_token(parser);
@@ -107,7 +108,7 @@ static struct ast* parse_error(struct parser* parser, const char* msg) {
 }
 
 static struct ast* parse_bool_literal(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     bool bool_literal = parser->ahead->tag == TOKEN_TRUE;
     eat_token(parser, bool_literal ? TOKEN_TRUE : TOKEN_FALSE);
     return alloc_ast(parser, &begin_pos, &(struct ast) {
@@ -117,7 +118,7 @@ static struct ast* parse_bool_literal(struct parser* parser) {
 }
 
 static struct ast* parse_int_literal(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     int_literal int_literal = parser->ahead->int_literal;
     eat_token(parser, TOKEN_INT_LITERAL);
     return alloc_ast(parser, &begin_pos, &(struct ast) {
@@ -127,7 +128,7 @@ static struct ast* parse_int_literal(struct parser* parser) {
 }
 
 static struct ast* parse_float_literal(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     float_literal float_literal = parser->ahead->float_literal;
     eat_token(parser, TOKEN_FLOAT_LITERAL);
     return alloc_ast(parser, &begin_pos, &(struct ast) {
@@ -137,7 +138,7 @@ static struct ast* parse_float_literal(struct parser* parser) {
 }
 
 static struct ast* parse_string_literal(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     struct str str = str_create();
     while (parser->ahead->tag == TOKEN_STRING_LITERAL) {
         str_append(&str, str_view_shrink(token_str_view(parser->lexer.data, parser->ahead), 1, 1));
@@ -154,7 +155,7 @@ static struct ast* parse_string_literal(struct parser* parser) {
 }
 
 static struct ast* parse_compound_init(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_LBRACE);
     struct ast* elems = parse_many(parser, TOKEN_RBRACE, TOKEN_COMMA, parse_expr);
     return alloc_ast(parser, &begin_pos, &(struct ast) {
@@ -164,7 +165,7 @@ static struct ast* parse_compound_init(struct parser* parser) {
 }
 
 static struct ast* parse_cast_expr(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_LPAREN);
     struct ast* type = parse_type(parser);
     expect_token(parser, TOKEN_RPAREN);
@@ -188,14 +189,14 @@ static struct ast* parse_compound_expr(struct parser* parser) {
         prev->next = parse_expr(parser);
         prev = prev->next;
     }
-    return alloc_ast(parser, &first->source_range.begin, &(struct ast) {
+    return alloc_ast(parser, &first->loc.begin, &(struct ast) {
         .tag = AST_COMPOUND_EXPR,
         .compound_expr.elems = first
     });
 }
 
 static struct ast* parse_paren_expr(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_LPAREN);
     struct ast* inner_expr = parse_compound_expr(parser);
     expect_token(parser, TOKEN_RPAREN);
@@ -219,7 +220,7 @@ static struct ast* parse_cast_or_paren_expr(struct parser* parser) {
 }
 
 static struct ast* parse_ident_expr(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     const char* name = parse_ident(parser);
     return alloc_ast(parser, &begin_pos, &(struct ast) {
         .tag = AST_IDENT_EXPR,
@@ -228,7 +229,7 @@ static struct ast* parse_ident_expr(struct parser* parser) {
 }
 
 static struct ast* parse_construct_expr(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     struct ast* type = parse_type(parser);
     expect_token(parser, TOKEN_LPAREN);
     struct ast* args = parse_many(parser, TOKEN_RPAREN, TOKEN_COMMA, parse_expr);
@@ -254,7 +255,6 @@ static struct ast* parse_primary_expr(struct parser* parser) {
 #define x(name, ...) case TOKEN_##name:
         PRIM_TYPE_LIST(x)
 #undef x
-        case TOKEN_CLOSURE:
             return parse_construct_expr(parser);
         default:
             return parse_error(parser, "expression");
@@ -262,14 +262,13 @@ static struct ast* parse_primary_expr(struct parser* parser) {
 }
 
 static struct ast* parse_pre_unary_expr(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
-    enum unary_expr_tag tag = UNARY_EXPR_PLUS;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
+    enum unary_expr_tag tag = UNARY_EXPR_NOT;
     switch (parser->ahead->tag) {
         case TOKEN_NOT: tag = UNARY_EXPR_NOT;     break;
         case TOKEN_SUB: tag = UNARY_EXPR_NEG;     break;
         case TOKEN_INC: tag = UNARY_EXPR_PRE_INC; break;
         case TOKEN_DEC: tag = UNARY_EXPR_PRE_DEC; break;
-        case TOKEN_ADD: tag = UNARY_EXPR_PLUS;    break;
         default:
             assert(false && "invalid prefix unary operation");
             break;
@@ -298,25 +297,10 @@ static struct ast* parse_prefix_expr(struct parser* parser) {
     }
 }
 
-static struct ast* parse_ternary_expr(struct parser* parser, struct ast* cond) {
-    eat_token(parser, TOKEN_QUESTION);
-    struct ast* then_expr = parse_expr(parser);
-    expect_token(parser, TOKEN_COLON);
-    struct ast* else_expr = parse_expr(parser);
-    return alloc_ast(parser, &cond->source_range.begin, &(struct ast) {
-        .tag = AST_TERNARY_EXPR,
-        .ternary_expr = {
-            .cond = cond,
-            .then_expr = then_expr,
-            .else_expr = else_expr
-        }
-    });
-}
-
 static struct ast* parse_proj_expr(struct parser* parser, struct ast* value) {
     eat_token(parser, TOKEN_DOT);
     const char* elem = parse_ident(parser);
-    return alloc_ast(parser, &value->source_range.begin, &(struct ast) {
+    return alloc_ast(parser, &value->loc.begin, &(struct ast) {
         .tag = AST_PROJ_EXPR,
         .proj_expr = {
             .value = value,
@@ -329,7 +313,7 @@ static struct ast* parse_index_expr(struct parser* parser, struct ast* value) {
     eat_token(parser, TOKEN_LBRACKET);
     struct ast* index = parse_expr(parser);
     expect_token(parser, TOKEN_RBRACKET);
-    return alloc_ast(parser, &value->source_range.begin, &(struct ast) {
+    return alloc_ast(parser, &value->loc.begin, &(struct ast) {
         .tag = AST_INDEX_EXPR,
         .index_expr = {
             .value = value,
@@ -342,7 +326,7 @@ static struct ast* parse_post_inc_or_dec_expr(struct parser* parser, struct ast*
     enum unary_expr_tag tag = parser->ahead->tag == TOKEN_INC
         ? UNARY_EXPR_POST_INC : UNARY_EXPR_POST_DEC;
     next_token(parser);
-    return alloc_ast(parser, &arg->source_range.begin, &(struct ast) {
+    return alloc_ast(parser, &arg->loc.begin, &(struct ast) {
         .tag = AST_UNARY_EXPR,
         .unary_expr = {
             .tag = tag,
@@ -354,7 +338,7 @@ static struct ast* parse_post_inc_or_dec_expr(struct parser* parser, struct ast*
 static struct ast* parse_call_expr(struct parser* parser, struct ast* callee) {
     eat_token(parser, TOKEN_LPAREN);
     struct ast* args = parse_many(parser, TOKEN_RPAREN, TOKEN_COMMA, parse_expr);
-    return alloc_ast(parser, &callee->source_range.begin, &(struct ast) {
+    return alloc_ast(parser, &callee->loc.begin, &(struct ast) {
         .tag = AST_CALL_EXPR,
         .call_expr = {
             .callee = callee,
@@ -367,7 +351,6 @@ static struct ast* parse_suffix_expr(struct parser* parser) {
     struct ast* expr = parse_prefix_expr(parser);
     while (true) {
         switch (parser->ahead->tag) {
-            case TOKEN_QUESTION: expr = parse_ternary_expr(parser, expr);         break;
             case TOKEN_DOT:      expr = parse_proj_expr(parser, expr);            break;
             case TOKEN_LBRACKET: expr = parse_index_expr(parser, expr);           break;
             case TOKEN_INC:
@@ -383,8 +366,11 @@ static struct ast* parse_binary_expr(struct parser* parser, struct ast* left, in
         enum binary_expr_tag tag;
         switch (parser->ahead->tag) {
 #define x(name, tok, ...) case TOKEN_##tok: tag = BINARY_EXPR_##name; break;
-            BINARY_EXPR_LIST(x)
-
+            ARITH_EXPR_LIST(x)
+            SHIFT_EXPR_LIST(x)
+            CMP_EXPR_LIST(x)
+            BIT_EXPR_LIST(x)
+            LOGIC_EXPR_LIST(x)
 #undef x
             default: return left;
         }
@@ -396,13 +382,12 @@ static struct ast* parse_binary_expr(struct parser* parser, struct ast* left, in
             return left;
         } else {
             next_token(parser);
-            struct ast* right = parse_binary_expr(parser, parse_suffix_expr(parser), prec - 1);
-            left = alloc_ast(parser, &left->source_range.begin, &(struct ast) {
+            left->next = parse_binary_expr(parser, parse_suffix_expr(parser), prec - 1);
+            left = alloc_ast(parser, &left->loc.begin, &(struct ast) {
                 .tag = AST_BINARY_EXPR,
                 .binary_expr = {
                     .tag = tag,
-                    .left = left,
-                    .right = right
+                    .args = left
                 }
             });
         }
@@ -410,16 +395,65 @@ static struct ast* parse_binary_expr(struct parser* parser, struct ast* left, in
     return parse_suffix_expr(parser);
 }
 
-static struct ast* parse_expr(struct parser* parser) {
-    int max_precedence = 0;
-#define x(name, tok, str, prec) max_precedence = max_precedence < prec ? prec : max_precedence;
-    BINARY_EXPR_LIST(x)
+static inline int max_precedence() {
+    int max_prec = 0;
+#define x(name, tok, str, prec) max_prec = max_prec < prec ? prec : max_prec;
+    ARITH_EXPR_LIST(x)
+    SHIFT_EXPR_LIST(x)
+    CMP_EXPR_LIST(x)
+    BIT_EXPR_LIST(x)
+    LOGIC_EXPR_LIST(x)
 #undef x
-    return parse_binary_expr(parser, parse_suffix_expr(parser), max_precedence);
+    return max_prec;
+}
+
+static struct ast* parse_ternary_expr(struct parser* parser) {
+    struct ast* cond = parse_binary_expr(parser, parse_suffix_expr(parser), max_precedence());
+    if (!accept_token(parser, TOKEN_QUESTION))
+        return cond;
+
+    struct ast* then_expr = parse_expr(parser);
+    expect_token(parser, TOKEN_COLON);
+    struct ast* else_expr = parse_expr(parser);
+    return alloc_ast(parser, &cond->loc.begin, &(struct ast) {
+        .tag = AST_TERNARY_EXPR,
+        .ternary_expr = {
+            .cond = cond,
+            .then_expr = then_expr,
+            .else_expr = else_expr
+        }
+    });
+}
+
+static struct ast* parse_assign_expr(struct parser* parser) {
+    struct ast* left = parse_ternary_expr(parser);
+
+    enum binary_expr_tag tag;
+    switch (parser->ahead->tag) {
+#define x(name, tok, ...) case TOKEN_##tok: tag = BINARY_EXPR_##name; break;
+        ASSIGN_EXPR_LIST(x)
+#undef x
+        default:
+            return left;
+    }
+
+    next_token(parser);
+    left->next = parse_assign_expr(parser);
+    return alloc_ast(parser, &left->loc.begin, &(struct ast) {
+        .tag = AST_BINARY_EXPR,
+        .binary_expr = {
+            .tag = tag,
+            .args = left
+        }
+    });
+}
+
+static struct ast* parse_expr(struct parser* parser) {
+    return parse_assign_expr(parser);
 }
 
 static struct ast* parse_prim_type(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     bool is_closure = accept_token(parser, TOKEN_CLOSURE);
     enum prim_type_tag tag = PRIM_TYPE_VOID;
     switch (parser->ahead->tag) {
@@ -441,7 +475,7 @@ static struct ast* parse_prim_type(struct parser* parser) {
 }
 
 static struct ast* parse_shader_type(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     enum shader_type_tag tag = SHADER_TYPE_SHADER;
     switch (parser->ahead->tag) {
 #define x(name, ...) case TOKEN_##name: tag = SHADER_TYPE_##name; break;
@@ -459,7 +493,7 @@ static struct ast* parse_shader_type(struct parser* parser) {
 }
 
 static struct ast* parse_named_type(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     const char* name = parse_ident(parser);
     return alloc_ast(parser, &begin_pos, &(struct ast) {
         .tag = AST_NAMED_TYPE,
@@ -497,7 +531,7 @@ static struct ast* parse_array_dim(struct parser* parser) {
 }
 
 static struct ast* parse_metadatum(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     struct ast* type = parse_type(parser);
     const char* name = parse_ident(parser);
     expect_token(parser, TOKEN_EQ);
@@ -519,15 +553,15 @@ static struct ast* parse_metadata(struct parser* parser) {
 }
 
 static void parse_ignored_metadata(struct parser* parser) {
-    struct source_range source_range = parser->ahead->source_range;
+    struct file_loc loc = parser->ahead->loc;
     struct ast* metadata = parse_metadata(parser);
-    source_range.end = parser->prev_end;
+    loc.end = parser->prev_end;
     if (metadata)
-        log_warn(parser->lexer.log, &source_range, "shader metadata is not allowed here");
+        log_warn(parser->lexer.log, &loc, "shader metadata is not allowed here");
 }
 
 static struct ast* parse_param(struct parser* parser, bool is_shader_param) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     bool is_output = accept_token(parser, TOKEN_OUTPUT);
     struct ast* type = parse_type(parser);
     const char* name = parse_ident(parser);
@@ -561,7 +595,7 @@ static struct ast* parse_shader_param(struct parser* parser) {
 }
 
 static struct ast* parse_if_stmt(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_IF);
     expect_token(parser, TOKEN_LPAREN);
     struct ast* cond = parse_compound_expr(parser);
@@ -581,21 +615,21 @@ static struct ast* parse_if_stmt(struct parser* parser) {
 }
 
 static struct ast* parse_break_stmt(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_BREAK);
     expect_token(parser, TOKEN_SEMICOLON);
     return alloc_ast(parser, &begin_pos, &(struct ast) { .tag = AST_BREAK_STMT });
 }
 
 static struct ast* parse_continue_stmt(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_CONTINUE);
     expect_token(parser, TOKEN_SEMICOLON);
     return alloc_ast(parser, &begin_pos, &(struct ast) { .tag = AST_CONTINUE_STMT });
 }
 
 static struct ast* parse_return_stmt(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_RETURN);
     struct ast* value = NULL;
     if (!accept_token(parser, TOKEN_SEMICOLON)) {
@@ -609,7 +643,7 @@ static struct ast* parse_return_stmt(struct parser* parser) {
 }
 
 static struct ast* parse_while_loop(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_WHILE);
     expect_token(parser, TOKEN_LPAREN);
     struct ast* cond = parse_compound_expr(parser);
@@ -625,7 +659,7 @@ static struct ast* parse_while_loop(struct parser* parser) {
 }
 
 static struct ast* parse_do_while_loop(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_DO);
     struct ast* body = parse_stmt(parser);
     expect_token(parser, TOKEN_WHILE);
@@ -643,7 +677,7 @@ static struct ast* parse_do_while_loop(struct parser* parser) {
 }
 
 static struct ast* parse_var(struct parser* parser, bool with_init) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     const char* name = parse_ident(parser);
     struct ast* dim = parse_array_dim(parser);
     struct ast* init = NULL;
@@ -670,7 +704,7 @@ static struct ast* parse_var_without_init(struct parser* parser) {
 static struct ast* parse_var_decl(struct parser* parser, struct ast* type, bool with_init) {
     struct ast* vars = parse_many(parser, TOKEN_SEMICOLON, TOKEN_COMMA,
         with_init ? parse_var_with_init : parse_var_without_init);
-    return alloc_ast(parser, &type->source_range.begin, &(struct ast) {
+    return alloc_ast(parser, &type->loc.begin, &(struct ast) {
         .tag = AST_VAR_DECL,
         .var_decl = {
             .type = type,
@@ -680,7 +714,7 @@ static struct ast* parse_var_decl(struct parser* parser, struct ast* type, bool 
 }
 
 static struct ast* parse_block(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_LBRACE);
     struct ast* stmts = parse_many(parser, TOKEN_RBRACE, TOKEN_ERROR, parse_stmt);
     return alloc_ast(parser, &begin_pos, &(struct ast) {
@@ -701,7 +735,7 @@ static struct ast* parse_func_decl(struct parser* parser, struct ast* ret_type) 
     expect_token(parser, TOKEN_LPAREN);
     struct ast* params = parse_many(parser, TOKEN_RPAREN, TOKEN_COMMA, parse_func_param);
     struct ast* body = parse_block_or_error(parser);
-    return alloc_ast(parser, &ret_type->source_range.begin, &(struct ast) {
+    return alloc_ast(parser, &ret_type->loc.begin, &(struct ast) {
         .tag = AST_FUNC_DECL,
         .func_decl = {
             .ret_type = ret_type,
@@ -733,7 +767,7 @@ static struct ast* parse_for_init(struct parser* parser) {
 }
 
 static struct ast* parse_for_loop(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_FOR);
     expect_token(parser, TOKEN_LPAREN);
     struct ast* init = parse_for_init(parser);
@@ -768,7 +802,7 @@ static struct ast* parse_local_decl(struct parser* parser) {
 }
 
 static struct ast* parse_empty_stmt(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_SEMICOLON);
     return alloc_ast(parser, &begin_pos, &(struct ast) { .tag = AST_EMPTY_STMT });
 }
@@ -822,7 +856,7 @@ static struct ast* parse_stmt(struct parser* parser) {
 }
 
 static struct ast* parse_shader_decl(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     struct ast* type = parse_shader_type(parser);
     const char* name = parse_ident(parser);
     struct ast* metadata = parse_metadata(parser);
@@ -846,7 +880,7 @@ static struct ast* parse_field_decl(struct parser* parser) {
 }
 
 static struct ast* parse_struct_decl(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->source_range.begin;
+    struct source_pos begin_pos = parser->ahead->loc.begin;
     eat_token(parser, TOKEN_STRUCT);
     const char* name = parse_ident(parser);
     expect_token(parser, TOKEN_LBRACE);
@@ -880,10 +914,10 @@ static struct ast* parse_top_level_decl(struct parser* parser) {
     }
 }
 
-struct ast* parse(struct mem_pool* mem_pool, const char* data, size_t size, struct log* log) {
+struct ast* parse(struct mem_pool* mem_pool, const char* file_name, const char* data, size_t size, struct log* log) {
     struct parser parser = {
         .mem_pool = mem_pool,
-        .lexer = lexer_create(data, size, log)
+        .lexer = lexer_create(file_name, data, size, log)
     };
     for (size_t i = 0; i < TOKEN_LOOKAHEAD; ++i)
         next_token(&parser);

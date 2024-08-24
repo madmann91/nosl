@@ -9,14 +9,13 @@
 #include <stdint.h>
 
 #define UNARY_EXPR_LIST(x) \
-    x(PRE_INC, "++") \
-    x(PRE_DEC, "--") \
+    x(PRE_INC,  "++") \
+    x(PRE_DEC,  "--") \
     x(POST_INC, "++") \
     x(POST_DEC, "--") \
-    x(BIT_NOT, "~") \
-    x(NEG, "-") \
-    x(PLUS, "+") \
-    x(NOT, "!")
+    x(BIT_NOT,  "~") \
+    x(NEG,      "-") \
+    x(NOT,      "!")
 
 #define ASSIGN_EXPR_LIST(x) \
     x(ASSIGN,         EQ,        "=",   10) \
@@ -31,26 +30,41 @@
     x(ASSIGN_BIT_XOR, XOR_EQ,    "^=",  10) \
     x(ASSIGN_BIT_OR,  OR_EQ,     "|=",  10)
 
-#define BINARY_EXPR_LIST(x) \
+#define ARITH_EXPR_LIST(x) \
     x(MUL,            MUL,       "*",    1) \
     x(DIV,            DIV,       "/",    1) \
     x(REM,            REM,       "%",    1) \
     x(ADD,            ADD,       "+",    2) \
-    x(SUB,            SUB,       "-",    2) \
+    x(SUB,            SUB,       "-",    2)
+
+#define SHIFT_EXPR_LIST(x) \
     x(LSHIFT,         LSHIFT,    "<<",   3) \
-    x(RSHIFT,         RSHIFT,    ">>",   3) \
+    x(RSHIFT,         RSHIFT,    ">>",   3)
+
+#define CMP_EXPR_LIST(x) \
     x(CMP_LT,         CMP_LT,    "<",    4) \
     x(CMP_LE,         CMP_LE,    "<=",   4) \
     x(CMP_GT,         CMP_GT,    ">",    4) \
     x(CMP_GE,         CMP_GE,    ">=",   4) \
     x(CMP_NE,         CMP_NE,    "!=",   4) \
-    x(CMP_EQ,         CMP_EQ,    "==",   4) \
+    x(CMP_EQ,         CMP_EQ,    "==",   4)
+
+#define BIT_EXPR_LIST(x) \
     x(BIT_AND,        AND,       "&",    5) \
     x(BIT_XOR,        XOR,       "^",    6) \
-    x(BIT_OR,         OR,        "|",    7) \
+    x(BIT_OR,         OR,        "|",    7)
+
+#define LOGIC_EXPR_LIST(x) \
     x(LOGIC_AND,      LOGIC_AND, "&&",   8) \
-    x(LOGIC_OR,       LOGIC_OR,  "||",   9) \
-    ASSIGN_EXPR_LIST(x)
+    x(LOGIC_OR,       LOGIC_OR,  "||",   9)
+
+#define BINARY_EXPR_LIST(x) \
+    ASSIGN_EXPR_LIST(x) \
+    ARITH_EXPR_LIST(x) \
+    SHIFT_EXPR_LIST(x) \
+    CMP_EXPR_LIST(x) \
+    BIT_EXPR_LIST(x) \
+    LOGIC_EXPR_LIST(x)
 
 enum unary_expr_tag {
 #define x(name, ...) UNARY_EXPR_##name,
@@ -132,7 +146,7 @@ struct type;
 struct ast {
     enum ast_tag tag;
     const struct type* type;
-    struct source_range source_range;
+    struct file_loc loc;
     struct ast* next;
     union {
         bool bool_literal;
@@ -148,6 +162,7 @@ struct ast {
         } shader_type;
         struct {
             const char* name;
+            struct ast* symbol;
         } ident_expr, named_type;
         struct {
             const char* name;
@@ -190,8 +205,7 @@ struct ast {
         } var_decl;
         struct {
             enum binary_expr_tag tag;
-            struct ast* left;
-            struct ast* right;
+            struct ast* args;
         } binary_expr;
         struct {
             enum unary_expr_tag tag;
@@ -204,6 +218,7 @@ struct ast {
         struct {
             struct ast* type;
             struct ast* args;
+            bool has_space;
         } construct_expr;
         struct {
             struct ast* elems;
@@ -222,6 +237,7 @@ struct ast {
         struct {
             struct ast* value;
             const char* elem;
+            size_t index;
         } proj_expr;
         struct {
             struct ast* cond;
@@ -269,14 +285,19 @@ SMALL_VEC_DECL(small_ast_vec, struct ast*, PUBLIC)
 [[nodiscard]] const char* shader_type_tag_to_string(enum shader_type_tag);
 [[nodiscard]] const char* binary_expr_tag_to_string(enum binary_expr_tag);
 [[nodiscard]] const char* unary_expr_tag_to_string(enum unary_expr_tag);
+[[nodiscard]] const char* binary_expr_tag_to_func_name(enum binary_expr_tag);
+[[nodiscard]] const char* unary_expr_tag_to_func_name(enum unary_expr_tag);
 [[nodiscard]] enum binary_expr_tag binary_expr_tag_remove_assign(enum binary_expr_tag);
 [[nodiscard]] bool binary_expr_tag_is_assign(enum binary_expr_tag);
+[[nodiscard]] bool binary_expr_tag_is_logic(enum binary_expr_tag);
 [[nodiscard]] bool unary_expr_tag_is_inc_or_dec(enum unary_expr_tag);
 [[nodiscard]] enum prim_type_tag ast_literal_tag_to_prim_type_tag(enum ast_tag);
 
 void ast_print(FILE*, const struct ast*, const struct ast_print_options*);
 void ast_dump(const struct ast*);
 
+[[nodiscard]] bool ast_is_mutable(const struct ast*);
 [[nodiscard]] size_t ast_list_size(const struct ast*);
 [[nodiscard]] size_t ast_field_count(const struct ast*);
 [[nodiscard]] const char* ast_decl_name(const struct ast*);
+[[nodiscard]] struct ast* ast_skip_parens(struct ast*);

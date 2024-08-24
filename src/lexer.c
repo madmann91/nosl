@@ -6,11 +6,12 @@
 #include <ctype.h>
 #include <inttypes.h>
 
-struct lexer lexer_create(const char* data, size_t size, struct log* log) {
+struct lexer lexer_create(const char* file_name, const char* data, size_t size, struct log* log) {
     return (struct lexer) {
         .data = data,
         .bytes_left = size,
         .source_pos = { .row = 1, .col = 1, .bytes = 0 },
+        .file_name = file_name,
         .log = log
     };
 }
@@ -56,7 +57,8 @@ static inline struct token make_token(
 {
     return (struct token) {
         .tag = tag,
-        .source_range = {
+        .loc = {
+            .file_name = lexer->file_name,
             .begin = *begin_pos,
             .end = lexer->source_pos
         }
@@ -229,7 +231,11 @@ struct token lexer_advance(struct lexer* lexer) {
                 while (true) {
                     if (is_eof(lexer)) {
                         log_error(lexer->log,
-                            &(struct source_range) { .begin = begin_pos, .end = lexer->source_pos },
+                            &(struct file_loc) {
+                                .file_name = lexer->file_name,
+                                .begin = begin_pos,
+                                .end = lexer->source_pos
+                            },
                             "unterminated multi-line comment");
                         break;
                     }
@@ -285,7 +291,11 @@ struct token lexer_advance(struct lexer* lexer) {
                 eat_char(lexer);
             }
             log_error(lexer->log,
-                &(struct source_range) { .begin = begin_pos, .end = lexer->source_pos },
+                &(struct file_loc) {
+                    .file_name = lexer->file_name,
+                    .begin = begin_pos,
+                    .end = lexer->source_pos
+                },
                 "unterminated string literal");
             return make_token(lexer, &begin_pos, TOKEN_ERROR);
         }
@@ -304,7 +314,7 @@ struct token lexer_advance(struct lexer* lexer) {
         struct token error_token = make_token(lexer, &begin_pos, TOKEN_ERROR);
         struct str_view error_str = token_str_view(lexer->data, &error_token);
         log_error(lexer->log,
-            &error_token.source_range,
+            &error_token.loc,
             "invalid token '%.*s'", (int)error_str.length, error_str.data);
         return error_token;
     }
