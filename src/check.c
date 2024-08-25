@@ -1032,6 +1032,7 @@ void check(
         .env = env_create(),
         .log = log
     };
+    builtins_populate_env(builtins, type_checker.env);
     for (; ast; ast = ast->next)
         check_top_level_decl(&type_checker, ast);
     env_destroy(type_checker.env);

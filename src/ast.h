@@ -155,6 +155,9 @@ struct ast {
         float_literal float_literal;
         const char* string_literal;
         struct {
+            const char* name;
+        } builtin;
+        struct {
             bool is_closure;
             enum prim_type_tag tag;
         } prim_type;
@@ -284,8 +287,6 @@ struct ast_print_options {
 };
 
 SMALL_VEC_DECL(small_ast_vec, struct ast*, PUBLIC)
-
-struct ast* ast_link(struct ast**, size_t);
 
 [[nodiscard]] bool unary_expr_tag_is_postfix(enum unary_expr_tag);
 [[nodiscard]] int binary_expr_tag_precedence(enum binary_expr_tag);
