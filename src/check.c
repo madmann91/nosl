@@ -2,7 +2,7 @@
 #include "env.h"
 #include "ast.h"
 #include "type_table.h"
-#include "preamble.h"
+#include "builtins.h"
 
 #include <overture/log.h>
 #include <overture/mem_pool.h>
@@ -17,7 +17,7 @@ struct type_checker {
     struct type_print_options type_print_options;
     struct mem_pool* mem_pool;
     struct type_table* type_table;
-    const struct preamble* preamble;
+    const struct builtins* builtins;
     struct env* env;
     struct log* log;
 };
@@ -128,21 +128,21 @@ static inline struct const_eval eval_const_int(struct type_checker*, struct ast*
 }
 
 static const struct type* check_prim_type(struct type_checker* type_checker, struct ast* ast) {
-    const struct type* prim_type = type_table_get_prim_type(type_checker->type_table, ast->prim_type.tag);
+    const struct type* prim_type = type_table_make_prim_type(type_checker->type_table, ast->prim_type.tag);
     if (!ast->prim_type.is_closure)
         return prim_type;
-    return type_table_get_closure_type(type_checker->type_table, prim_type);
+    return type_table_make_closure_type(type_checker->type_table, prim_type);
 }
 
 static const struct type* check_shader_type(struct type_checker* type_checker, struct ast* ast) {
-    return type_table_get_shader_type(type_checker->type_table, ast->shader_type.tag);
+    return type_table_make_shader_type(type_checker->type_table, ast->shader_type.tag);
 }
 
 static const struct type* check_named_type(struct type_checker* type_checker, struct ast* ast) {
     struct ast* symbol = env_find_one_symbol(type_checker->env, ast->named_type.name);
     if (!symbol) {
         log_error(type_checker->log, &ast->loc, "unknown identifier '%s'", ast->named_type.name);
-        return ast->type = type_table_get_error_type(type_checker->type_table);
+        return ast->type = type_table_make_error_type(type_checker->type_table);
     }
     assert(symbol->type);
     ast->named_type.symbol = symbol;
@@ -156,7 +156,7 @@ static const struct type* check_type(struct type_checker* type_checker, struct a
         case AST_NAMED_TYPE:  return check_named_type(type_checker, ast);
         default:
             assert(false && "invalid type");
-            return type_table_get_error_type(type_checker->type_table);
+            return type_table_make_error_type(type_checker->type_table);
     }
 }
 
@@ -174,16 +174,16 @@ static const struct type* check_array_dim(
             log_error(type_checker->log, &ast->loc,
                 "unsized arrays are only allowed as function or shader parameters");
         }
-        return type_table_get_unsized_array_type(type_checker->type_table, elem_type);
+        return type_table_make_unsized_array_type(type_checker->type_table, elem_type);
     } else {
-        check_expr(type_checker, ast, type_table_get_prim_type(type_checker->type_table, PRIM_TYPE_INT));
+        check_expr(type_checker, ast, type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_INT));
         struct const_eval const_eval = eval_const_int(type_checker, ast);
         if (!const_eval.is_const || const_eval.int_val <= 0) {
             log_error(type_checker->log, &ast->loc,
                 "array dimension must be constant and strictly positive");
             const_eval.int_val = 1;
         }
-        return type_table_get_sized_array_type(type_checker->type_table, elem_type, (size_t)const_eval.int_val);
+        return type_table_make_sized_array_type(type_checker->type_table, elem_type, (size_t)const_eval.int_val);
     }
 }
 
@@ -268,7 +268,7 @@ static void check_shader_or_func_decl(struct type_checker* type_checker, struct 
             .is_output = param->param.is_output
         });
     }
-    ast->type = type_table_get_func_type(
+    ast->type = type_table_make_func_type(
         type_checker->type_table, ret_type, func_params.elems, func_params.elem_count, false);
     small_func_param_vec_destroy(&func_params);
 
@@ -324,7 +324,7 @@ static const struct type* check_logic_expr(
 {
     check_cond(type_checker, ast->binary_expr.args);
     check_cond(type_checker, ast->binary_expr.args->next);
-    return ast->type = type_table_get_prim_type(type_checker->type_table, PRIM_TYPE_BOOL);
+    return ast->type = type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_BOOL);
 }
 
 static void check_cond(struct type_checker* type_checker, struct ast* ast) {
@@ -338,10 +338,10 @@ static void check_cond(struct type_checker* type_checker, struct ast* ast) {
             // Strings can be used as conditions or in logic expressions, in which case they are
             // considered to be "true" when they are non empty, and "false" otherwise.
             insert_cast(type_checker, ast,
-                type_table_get_prim_type(type_checker->type_table, PRIM_TYPE_BOOL));
+                type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_BOOL));
         } else {
             coerce_expr(type_checker, ast,
-                type_table_get_prim_type(type_checker->type_table, PRIM_TYPE_BOOL));
+                type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_BOOL));
         }
     }
 }
@@ -426,7 +426,7 @@ static const struct type* check_ident_expr(
                 : "unknown identifier '%s'",
             ast->ident_expr.name);
         small_ast_vec_destroy(&all_symbols);
-        return type_table_get_error_type(type_checker->type_table);
+        return type_table_make_error_type(type_checker->type_table);
     }
     ast->ident_expr.symbol = symbol;
     return ast->type = symbol->type;
@@ -639,7 +639,7 @@ static const struct type* check_callee(
     struct ast* symbol = find_func_with_name(
         type_checker, &ast->loc, callee->ident_expr.name, ret_type, args);
 
-    callee->type = symbol ? symbol->type : type_table_get_error_type(type_checker->type_table);
+    callee->type = symbol ? symbol->type : type_table_make_error_type(type_checker->type_table);
     callee->ident_expr.symbol = symbol;
     for (; ast != callee; ast = ast->paren_expr.inner_expr)
         ast->type = callee->type;
@@ -659,13 +659,13 @@ static const struct type* check_call_expr(
     const struct type* expected_type)
 {
     if (!check_call_args(type_checker, ast->call_expr.args))
-        return ast->type = type_table_get_error_type(type_checker->type_table);
+        return ast->type = type_table_make_error_type(type_checker->type_table);
 
     const struct type* callee_type = check_callee(
         type_checker, ast->call_expr.callee, expected_type, ast->call_expr.args);
     if (callee_type->tag != TYPE_FUNC) {
         // Error was already reported in find_func_by_name
-        return ast->type = type_table_get_error_type(type_checker->type_table);
+        return ast->type = type_table_make_error_type(type_checker->type_table);
     }
 
     assert(ast_list_size(ast->call_expr.args) == callee_type->func_type.param_count);
@@ -693,12 +693,12 @@ static const struct type* check_binary_expr(
         return check_logic_expr(type_checker, ast, expected_type);
 
     if (!check_call_args(type_checker, ast->binary_expr.args))
-        return ast->type = type_table_get_error_type(type_checker->type_table);
+        return ast->type = type_table_make_error_type(type_checker->type_table);
 
     const char* func_name = binary_expr_tag_to_func_name(ast->binary_expr.tag);
     struct ast* symbol = find_func_with_name(type_checker, &ast->loc, func_name, expected_type, ast->binary_expr.args);
     if (!symbol)
-        return ast->type = type_table_get_error_type(type_checker->type_table);
+        return ast->type = type_table_make_error_type(type_checker->type_table);
 
     ast->unary_expr.symbol = symbol;
     ast->type = find_func_ret_type(symbol);
@@ -714,12 +714,12 @@ static const struct type* check_unary_expr(
     const struct type* expected_type)
 {
     if (!check_call_args(type_checker, ast->unary_expr.arg))
-        return ast->type = type_table_get_error_type(type_checker->type_table);
+        return ast->type = type_table_make_error_type(type_checker->type_table);
 
     const char* func_name = unary_expr_tag_to_func_name(ast->unary_expr.tag);
     struct ast* symbol = find_func_with_name(type_checker, &ast->loc, func_name, expected_type, ast->unary_expr.arg);
     if (!symbol)
-        return ast->type = type_table_get_error_type(type_checker->type_table);
+        return ast->type = type_table_make_error_type(type_checker->type_table);
 
     ast->unary_expr.symbol = symbol;
     ast->type = find_func_ret_type(symbol);
@@ -747,7 +747,7 @@ static const struct type* check_array_init(
     size_t elem_count = 0;
     for (struct ast* elem = elems; elem; elem = elem->next, elem_count++)
         check_expr(type_checker, elem, elem_type);
-    return type_table_get_sized_array_type(type_checker->type_table, elem_type, elem_count);
+    return type_table_make_sized_array_type(type_checker->type_table, elem_type, elem_count);
 }
 
 static void check_struct_init(
@@ -788,22 +788,20 @@ static const struct type* check_constructor_call(
         return type;
     } else if (type->tag == TYPE_PRIM) {
         if (!check_call_args(type_checker, args))
-            return type_table_get_error_type(type_checker->type_table);
+            return type_table_make_error_type(type_checker->type_table);
 
-        struct small_ast_vec candidates;
-        small_ast_vec_init(&candidates);
-        small_ast_vec_resize(&candidates, type_checker->preamble->constructor_count[type->prim_type]);
-        xmemcpy(candidates.elems, type_checker->preamble->constructors[type->prim_type], sizeof(struct ast*) * candidates.elem_count);
+        struct small_ast_vec candidates = builtins_list_constructors(type_checker->builtins, type->prim_type);
+        small_ast_vec_relocate(&candidates);
         struct ast* symbol = find_func_from_candidates(
             type_checker, loc, prim_type_tag_to_string(type->prim_type), candidates.elems, candidates.elem_count, type, args);
         small_ast_vec_destroy(&candidates);
         if (!symbol)
-            return type_table_get_error_type(type_checker->type_table);
+            return type_table_make_error_type(type_checker->type_table);
 
         return find_func_ret_type(symbol);
     } else {
         report_invalid_type_with_msg(type_checker, loc, type, "constructible");
-        return type_table_get_error_type(type_checker->type_table);
+        return type_table_make_error_type(type_checker->type_table);
     }
 }
 
@@ -815,7 +813,7 @@ static const struct type* check_compound_init(
     if (!expected_type) {
         log_error(type_checker->log, &ast->loc,
             "compound initializers are only allowed where a structure, vector, point, normal, color, matrix, or array type is required");
-        return ast->type = type_table_get_error_type(type_checker->type_table);
+        return ast->type = type_table_make_error_type(type_checker->type_table);
     }
 
     if (expected_type->tag == TYPE_ARRAY)  {
@@ -826,7 +824,7 @@ static const struct type* check_compound_init(
         return coerce_expr(type_checker, ast, expected_type);
     } else {
         report_invalid_type_with_msg(type_checker, &ast->loc, expected_type, "compound-initializable");
-        return ast->type = type_table_get_error_type(type_checker->type_table);
+        return ast->type = type_table_make_error_type(type_checker->type_table);
     }
 }
 
@@ -859,10 +857,10 @@ static const struct type* check_single_index_expr(
     if (value_type->tag == TYPE_ARRAY) {
         return value_type->array_type.elem_type;
     } else if (type_is_triple(value_type)) {
-        return type_table_get_prim_type(type_checker->type_table, PRIM_TYPE_FLOAT);
+        return type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_FLOAT);
     } else {
         report_invalid_type_with_msg(type_checker, loc, value_type, "vector, point, normal, color, or array");
-        return type_table_get_error_type(type_checker->type_table);
+        return type_table_make_error_type(type_checker->type_table);
     }
 }
 
@@ -871,7 +869,7 @@ static const struct type* check_index_expr(
     struct ast* ast,
     const struct type* expected_type)
 {
-    const struct type* int_type = type_table_get_prim_type(type_checker->type_table, PRIM_TYPE_INT);
+    const struct type* int_type = type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_INT);
     if (ast->index_expr.value->tag != AST_INDEX_EXPR) {
         const struct type* value_type = check_expr(type_checker, ast->index_expr.value, NULL);
         check_expr(type_checker, ast->index_expr.index, int_type);
@@ -883,7 +881,7 @@ static const struct type* check_index_expr(
     check_expr(type_checker, ast->index_expr.index, int_type);
     check_expr(type_checker, ast->index_expr.value->index_expr.index, int_type);
     if (type_is_prim_type(value_type, PRIM_TYPE_MATRIX)) {
-        ast->type = type_table_get_prim_type(type_checker->type_table, PRIM_TYPE_FLOAT);
+        ast->type = type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_FLOAT);
     } else {
         value_type = check_single_index_expr(type_checker, &ast->index_expr.value->index_expr.value->loc, value_type);
         ast->type  = check_single_index_expr(type_checker, &ast->index_expr.value->loc, value_type);
@@ -903,7 +901,7 @@ static const struct type* check_proj_expr(
         if (ast->proj_expr.elem[0] != 0 && ast->proj_expr.elem[1] == 0) {
             for (size_t i = 0; i < 3; ++i) {
                 if (ast->proj_expr.elem[0] == component_names[i]) {
-                    ast->type = type_table_get_prim_type(type_checker->type_table, PRIM_TYPE_FLOAT);
+                    ast->type = type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_FLOAT);
                     ast->proj_expr.index = i;
                     break;
                 }
@@ -920,7 +918,7 @@ static const struct type* check_proj_expr(
     }
 
     if (!ast->type) {
-        ast->type = type_table_get_error_type(type_checker->type_table);
+        ast->type = type_table_make_error_type(type_checker->type_table);
         if (value_type->tag != TYPE_ERROR) {
             char* type_string = type_to_string(value_type, &type_checker->type_print_options);
             log_error(type_checker->log, &ast->loc, "unknown field or component '%s' for type '%s'",
@@ -960,7 +958,7 @@ static const struct type* check_expr(
         case AST_INT_LITERAL:
         case AST_FLOAT_LITERAL:
         case AST_STRING_LITERAL: {
-            ast->type = type_table_get_prim_type(type_checker->type_table,
+            ast->type = type_table_make_prim_type(type_checker->type_table,
                 ast_literal_tag_to_prim_type_tag(ast->tag));
             return coerce_expr(type_checker, ast, expected_type);
         }
@@ -978,7 +976,7 @@ static const struct type* check_expr(
         case AST_CAST_EXPR:      return check_cast_expr(type_checker, ast, expected_type);
         default:
             assert(false && "invalid expression");
-            return type_table_get_error_type(type_checker->type_table);
+            return type_table_make_error_type(type_checker->type_table);
     }
 }
 
@@ -1022,7 +1020,7 @@ static void check_top_level_decl(struct type_checker* type_checker, struct ast* 
 void check(
     struct mem_pool* mem_pool,
     struct type_table* type_table,
-    const struct preamble* preamble,
+    const struct builtins* builtins,
     struct ast* ast,
     struct log* log)
 {
@@ -1030,7 +1028,7 @@ void check(
         .type_print_options.disable_colors = log->disable_colors,
         .mem_pool = mem_pool,
         .type_table = type_table,
-        .preamble = preamble,
+        .builtins = builtins,
         .env = env_create(),
         .log = log
     };

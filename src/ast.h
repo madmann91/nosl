@@ -285,6 +285,8 @@ struct ast_print_options {
 
 SMALL_VEC_DECL(small_ast_vec, struct ast*, PUBLIC)
 
+struct ast* ast_link(struct ast**, size_t);
+
 [[nodiscard]] bool unary_expr_tag_is_postfix(enum unary_expr_tag);
 [[nodiscard]] int binary_expr_tag_precedence(enum binary_expr_tag);
 [[nodiscard]] const char* prim_type_tag_to_string(enum prim_type_tag);

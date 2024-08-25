@@ -18,6 +18,16 @@ SMALL_VEC_IMPL(small_ast_vec, struct ast*, PUBLIC)
 
 static void print(FILE*, size_t, const struct ast*, const struct styles*);
 
+struct ast* ast_link(struct ast** elems, size_t count) {
+    struct ast* ast = NULL;
+    for (size_t i = 0; i < count; ++i) {
+        assert(!elems[i]->next);
+        elems[i]->next = ast;
+        ast = elems[i];
+    }
+    return ast;
+}
+
 bool unary_expr_tag_is_postfix(enum unary_expr_tag tag) {
     return tag == UNARY_EXPR_POST_INC || tag == UNARY_EXPR_POST_DEC;
 }

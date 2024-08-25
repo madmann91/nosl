@@ -2,7 +2,7 @@
 #include "check.h"
 #include "type_table.h"
 #include "ast.h"
-#include "preamble.h"
+#include "builtins.h"
 
 #include <overture/cli.h>
 #include <overture/file.h>
@@ -36,7 +36,7 @@ static enum cli_state usage(void*, char*) {
 static bool compile_file(
     const char* file_name,
     struct type_table* type_table,
-    const struct preamble* preamble,
+    const struct builtins* builtins,
     const struct options* options)
 {
     size_t file_size = 0;
@@ -68,7 +68,7 @@ static bool compile_file(
         });
     }
 
-    check(&mem_pool, type_table, preamble, program, &log);
+    check(&mem_pool, type_table, builtins, program, &log);
 
     goto done;
 
@@ -107,17 +107,18 @@ int main(int argc, char** argv) {
 
     struct mem_pool mem_pool = mem_pool_create();
     struct type_table* type_table = type_table_create(&mem_pool);
-    struct preamble preamble = preamble_build(&mem_pool, type_table);
+    struct builtins* builtins = builtins_create(type_table);
 
     bool status = true;
     size_t file_count = 0;
     for (int i = 1; i < argc; ++i) {
         if (!argv[i])
             continue;
-        status &= compile_file(argv[i], type_table, &preamble, &options);
+        status &= compile_file(argv[i], type_table, builtins, &options);
         file_count++;
     }
 
+    builtins_destroy(builtins);
     type_table_destroy(type_table);
     mem_pool_destroy(&mem_pool);
 

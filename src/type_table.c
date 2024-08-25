@@ -157,19 +157,19 @@ void type_table_finalize_struct_type(struct type_table* type_table, struct type*
     type->struct_type.name = str_pool_insert(type_table->str_pool, type->struct_type.name);
 }
 
-const struct type* type_table_get_error_type(struct type_table* type_table) {
+const struct type* type_table_make_error_type(struct type_table* type_table) {
     return insert_type(type_table, &(struct type) { .tag = TYPE_ERROR });
 }
 
-const struct type* type_table_get_prim_type(struct type_table* type_table, enum prim_type_tag tag) {
+const struct type* type_table_make_prim_type(struct type_table* type_table, enum prim_type_tag tag) {
     return insert_type(type_table, &(struct type) { .tag = TYPE_PRIM, .prim_type = tag });
 }
 
-const struct type* type_table_get_shader_type(struct type_table* type_table, enum shader_type_tag tag) {
+const struct type* type_table_make_shader_type(struct type_table* type_table, enum shader_type_tag tag) {
     return insert_type(type_table, &(struct type) { .tag = TYPE_SHADER, .shader_type = tag });
 }
 
-const struct type* type_table_get_closure_type(
+const struct type* type_table_make_closure_type(
     struct type_table* type_table,
     const struct type* inner_type)
 {
@@ -179,7 +179,7 @@ const struct type* type_table_get_closure_type(
     });
 }
 
-const struct type* type_table_get_sized_array_type(
+const struct type* type_table_make_sized_array_type(
     struct type_table* type_table,
     const struct type* elem_type,
     size_t elem_count)
@@ -194,7 +194,7 @@ const struct type* type_table_get_sized_array_type(
     });
 }
 
-const struct type* type_table_get_unsized_array_type(
+const struct type* type_table_make_unsized_array_type(
     struct type_table* type_table,
     const struct type* elem_type)
 {
@@ -204,7 +204,7 @@ const struct type* type_table_get_unsized_array_type(
     });
 }
 
-const struct type* type_table_get_func_type(
+const struct type* type_table_make_func_type(
     struct type_table* type_table,
     const struct type* ret_type,
     const struct func_param* params,
