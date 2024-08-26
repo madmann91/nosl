@@ -63,21 +63,28 @@ static inline bool is_type_equal(
                 type->array_type.elem_count == other->array_type.elem_count &&
                 type->array_type.elem_type == other->array_type.elem_type;
         case TYPE_FUNC:
-            return
-                type->func_type.ret_type == other->func_type.ret_type &&
-                type->func_type.has_ellipsis == other->func_type.has_ellipsis &&
-                type->func_type.param_count == other->func_type.param_count &&
-                !memcmp(
-                    type->func_type.params,
-                    other->func_type.params,
-                    sizeof(struct func_param) * type->func_type.param_count);
+            if (type->func_type.ret_type != other->func_type.ret_type ||
+                type->func_type.has_ellipsis != other->func_type.has_ellipsis ||
+                type->func_type.param_count != other->func_type.param_count)
+            {
+                return false;
+            }
+            for (size_t i = 0; i < type->func_type.param_count; ++i) {
+                if (type->func_type.params[i].type != other->func_type.params[i].type ||
+                    type->func_type.params[i].is_output != other->func_type.params[i].is_output)
+                {
+                    return false;
+                }
+            }
+            return true;
         case TYPE_COMPOUND:
-            return
-                type->compound_type.elem_count == other->compound_type.elem_count &&
-                !memcmp(
-                    type->compound_type.elem_types,
-                    other->compound_type.elem_types,
-                    sizeof(const struct type*) * type->compound_type.elem_count);
+            if (type->compound_type.elem_count != other->compound_type.elem_count)
+                return false;
+            for (size_t i = 0; i < type->compound_type.elem_count; ++i) {
+                if (type->compound_type.elem_types[i] != other->compound_type.elem_types[i])
+                    return false;
+            }
+            return true;
         default:
             return type == other;
     }
