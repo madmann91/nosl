@@ -31,39 +31,29 @@ struct const_eval {
 };
 
 static void check_stmt(struct type_checker*, struct ast*);
-static void check_cond(struct type_checker*, struct ast*);
 static const struct type* check_type(struct type_checker*, struct ast*);
 static const struct type* check_expr(struct type_checker*, struct ast*, const struct type*);
 
-static inline void insert_symbol(
-    struct type_checker* type_checker,
-    const char* name,
-    struct ast* ast,
-    bool allow_overload)
+static inline char* call_signature_to_string(
+    const struct type_checker* type_checker,
+    const struct type* ret_type,
+    struct ast* args)
 {
-    struct ast* old_ast = env_find_one_symbol(type_checker->env, name);
-    if (env_insert_symbol(type_checker->env, name, ast, allow_overload)) {
-        if (!old_ast || allow_overload)
-            return;
-        log_warn(type_checker->log, &ast->loc, "symbol '%s' shadows previous definition", name);
-    } else {
-        log_error(type_checker->log, &ast->loc, "redefinition for symbol '%s'", name);
+    struct mem_stream mem_stream;
+    mem_stream_init(&mem_stream);
+    if (ret_type) {
+        type_print(mem_stream.file, ret_type, &type_checker->type_print_options);
+        fputc(' ', mem_stream.file);
     }
-    log_note(type_checker->log, &old_ast->loc, "previously declared here");
-}
-
-static inline void insert_cast(
-    struct type_checker* type_checker,
-    struct ast* ast,
-    const struct type* type)
-{
-    struct ast* copy = MEM_POOL_ALLOC(*type_checker->mem_pool, struct ast);
-    memcpy(copy, ast, sizeof(struct ast));
-    copy->next = NULL;
-    ast->tag = AST_CAST_EXPR;
-    ast->cast_expr.type = NULL;
-    ast->cast_expr.value = ast;
-    ast->type = type;
+    fputc('(', mem_stream.file);
+    for (struct ast* arg = args; arg; arg = arg->next) {
+        type_print(mem_stream.file, arg->type, &type_checker->type_print_options);
+        if (arg->next)
+            fputs(", ", mem_stream.file);
+    }
+    fputc(')', mem_stream.file);
+    mem_stream_destroy(&mem_stream);
+    return mem_stream.buf;
 }
 
 static inline void report_invalid_type(
@@ -98,6 +88,107 @@ static inline void report_invalid_type_with_msg(
     free(type_string);
 }
 
+static inline void report_previous_location(struct type_checker* type_checker, struct file_loc* loc) {
+    if (loc->file_name)
+        log_note(type_checker->log, loc, "previously declared here");
+}
+
+static inline void report_overload_error(
+    struct type_checker* type_checker,
+    const struct file_loc* loc,
+    const char* msg,
+    const char* func_name,
+    struct ast** candidates,
+    size_t candidate_count,
+    const struct type* ret_type,
+    struct ast* args)
+{
+    char* signature_string = call_signature_to_string(type_checker, ret_type, args);
+    log_error(type_checker->log, loc, "%s call to '%s' with signature '%s'",
+        msg, func_name, signature_string);
+    free(signature_string);
+    for (size_t i = 0; i < candidate_count; ++i) {
+        char* candidate_type_string = type_to_string(candidates[i]->type, &type_checker->type_print_options);
+        log_note(type_checker->log, &candidates[i]->loc, "candidate with type '%s'", candidate_type_string);
+        free(candidate_type_string);
+    }
+}
+
+static inline void report_missing_field(
+    struct type_checker* type_checker,
+    const struct file_loc* loc,
+    const struct type* type,
+    size_t field_index)
+{
+    // Only report one missing field, to avoid bloating the log
+    assert(type->tag == TYPE_STRUCT);
+    log_warn(type_checker->log, loc, "missing initializer for field '%s'",
+        type->struct_type.fields[field_index].name);
+}
+
+static inline void report_lossy_coercion(
+    struct type_checker* type_checker,
+    const struct file_loc* loc,
+    const struct type* type,
+    const struct type* expected_type)
+{
+    char* type_string = type_to_string(type, &type_checker->type_print_options);
+    char* expected_type_string = type_to_string(expected_type, &type_checker->type_print_options);
+    log_warn(type_checker->log, loc, "implicit conversion from '%s' to '%s' may lose information",
+        type_string, expected_type_string);
+    free(type_string);
+    free(expected_type_string);
+}
+
+static inline void report_incomplete_coercion(
+    struct type_checker* type_checker,
+    const struct file_loc* loc,
+    const struct type* type,
+    const struct type* expected_type)
+{
+    if (type->tag == TYPE_COMPOUND && expected_type->tag == TYPE_STRUCT)
+        report_missing_field(type_checker, loc, expected_type, type->compound_type.elem_count);
+}
+
+static inline void insert_symbol(
+    struct type_checker* type_checker,
+    const char* name,
+    struct ast* ast,
+    bool allow_overload)
+{
+    struct ast* old_ast = env_find_one_symbol(type_checker->env, name);
+    if (env_insert_symbol(type_checker->env, name, ast, allow_overload)) {
+        if (!old_ast || allow_overload)
+            return;
+        log_warn(type_checker->log, &ast->loc, "symbol '%s' shadows previous definition", name);
+    } else {
+        log_error(type_checker->log, &ast->loc, "redefinition for symbol '%s'", name);
+    }
+    assert(old_ast);
+    report_previous_location(type_checker, &old_ast->loc);
+}
+
+static inline void insert_cast(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* type)
+{
+    struct ast* copy = MEM_POOL_ALLOC(*type_checker->mem_pool, struct ast);
+    memcpy(copy, ast, sizeof(struct ast));
+    copy->next = NULL;
+    ast->tag = AST_CAST_EXPR;
+    ast->cast_expr.type = NULL;
+    ast->cast_expr.value = ast;
+    ast->type = type;
+}
+
+static inline bool is_safely_coercible_int_literal(struct ast* ast) {
+    ast = ast_skip_parens(ast);
+    return
+        ast->tag == AST_INT_LITERAL &&
+        ((int)(float)(int)ast->int_literal) == ((int)ast->int_literal);
+}
+
 static inline const struct type* coerce_expr(
     struct type_checker* type_checker,
     struct ast* ast,
@@ -107,10 +198,17 @@ static inline const struct type* coerce_expr(
     if (!expected_type || ast->type == expected_type)
         return ast->type;
 
-    if (type_is_coercible_to(ast->type, expected_type))
+    enum coercion_rank coercion_rank = type_coercion_rank(ast->type, expected_type);
+    if (coercion_rank != COERCION_IMPOSSIBLE) {
+        if (type_coercion_is_lossy(ast->type, expected_type) && !is_safely_coercible_int_literal(ast)) {
+            report_lossy_coercion(type_checker, &ast->loc, ast->type, expected_type);
+        } else if (type_coercion_is_incomplete(ast->type, expected_type)) {
+            report_incomplete_coercion(type_checker, &ast->loc, ast->type, expected_type);
+        }
         insert_cast(type_checker, ast, expected_type);
-    else
+    } else {
         report_invalid_type(type_checker, &ast->loc, ast->type, expected_type);
+    }
     return expected_type;
 }
 
@@ -281,11 +379,11 @@ static void check_shader_or_func_decl(struct type_checker* type_checker, struct 
         char* type_string = type_to_string(ast->type, &type_checker->type_print_options);
         log_error(type_checker->log, &ast->loc, "redefinition for %s '%s' with type '%s'",
             ast->tag == AST_FUNC_DECL ? "function" : "shader", decl_name, type_string);
-        log_note(type_checker->log, &conflicting_overload->loc, "previously declared here");
+        report_previous_location(type_checker, &conflicting_overload->loc);
         free(type_string);
+    } else {
+        insert_symbol(type_checker, decl_name, ast, true);
     }
-
-    insert_symbol(type_checker, decl_name, ast, true);
 }
 
 static void check_return_stmt(struct type_checker* type_checker, struct ast* ast) {
@@ -317,6 +415,10 @@ static void check_break_or_continue_stmt(struct type_checker* type_checker, stru
     ast->break_stmt.loop = loop;
 }
 
+static void check_cond(struct type_checker* type_checker, struct ast* ast) {
+    check_expr(type_checker, ast, type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_BOOL));
+}
+
 static const struct type* check_logic_expr(
     struct type_checker* type_checker,
     struct ast* ast,
@@ -324,26 +426,8 @@ static const struct type* check_logic_expr(
 {
     check_cond(type_checker, ast->binary_expr.args);
     check_cond(type_checker, ast->binary_expr.args->next);
-    return ast->type = type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_BOOL);
-}
-
-static void check_cond(struct type_checker* type_checker, struct ast* ast) {
-    if (ast->tag == AST_BINARY_EXPR && binary_expr_tag_is_logic(ast->binary_expr.tag)) {
-        check_logic_expr(type_checker, ast, NULL);
-    } else {
-        check_expr(type_checker, ast, NULL);
-        if (type_is_prim_type(ast->type, PRIM_TYPE_STRING) ||
-            type_is_prim_type(ast->type, PRIM_TYPE_INT))
-        {
-            // Strings can be used as conditions or in logic expressions, in which case they are
-            // considered to be "true" when they are non empty, and "false" otherwise.
-            insert_cast(type_checker, ast,
-                type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_BOOL));
-        } else {
-            coerce_expr(type_checker, ast,
-                type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_BOOL));
-        }
-    }
+    ast->type = type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_BOOL);
+    return coerce_expr(type_checker, ast, expected_type);
 }
 
 static void check_while_loop(struct type_checker* type_checker, struct ast* ast) {
@@ -422,14 +506,15 @@ static const struct type* check_ident_expr(
         small_ast_vec_relocate(&all_symbols);
         log_error(type_checker->log, &ast->loc,
             all_symbols.elem_count > 0
-                ? "identifier '%s' is overloaded"
+                ? "cannot resolve overloaded identifier '%s'"
                 : "unknown identifier '%s'",
             ast->ident_expr.name);
         small_ast_vec_destroy(&all_symbols);
         return type_table_make_error_type(type_checker->type_table);
     }
     ast->ident_expr.symbol = symbol;
-    return ast->type = symbol->type;
+    ast->type = symbol->type;
+    return coerce_expr(type_checker, ast, expected_type);
 }
 
 static const struct type* check_assign_expr(
@@ -444,12 +529,12 @@ static const struct type* check_assign_expr(
     return coerce_expr(type_checker, ast, expected_type);
 }
 
-static inline bool is_viable_candidate(const struct type* candidate_type, struct ast* args, size_t arg_count) {
+static inline bool is_viable_candidate(const struct type* candidate_type, const struct ast* args, size_t arg_count) {
     assert(candidate_type->tag == TYPE_FUNC);
     if (candidate_type->func_type.param_count > arg_count ||
         (candidate_type->func_type.param_count < arg_count && !candidate_type->func_type.has_ellipsis))
         return false;
-    struct ast* arg = args;
+    const struct ast* arg = args;
     for (size_t i = 0; i < candidate_type->func_type.param_count; ++i, arg = arg->next) {
         if (candidate_type->func_type.params[i].is_output && !ast_is_mutable(arg))
             return false;
@@ -462,7 +547,7 @@ static inline bool is_viable_candidate(const struct type* candidate_type, struct
 static inline size_t remove_non_viable_candidates(
     struct ast** candidates,
     size_t candidate_count,
-    struct ast* args)
+    const struct ast* args)
 {
     size_t j = 0, arg_count = ast_list_size(args);
     for (size_t i = 0; i < candidate_count; ++i) {
@@ -472,59 +557,34 @@ static inline size_t remove_non_viable_candidates(
     return j;
 }
 
-static inline enum coercion_rank coercion_rank_for_arg(
-    size_t arg_index,
-    const struct type* arg_type,
-    const struct type* candidate_type)
-{
-    if (arg_index >= candidate_type->func_type.param_count) {
-        assert(candidate_type->func_type.has_ellipsis);
-        return COERCION_ELLIPSIS;
-    }
-    return type_coercion_rank(arg_type, candidate_type->func_type.params[arg_index].type);
-}
-
 static bool is_better_candidate(
-    struct ast* candidate,
-    struct ast* other,
+    const struct ast* candidate,
+    const struct ast* other,
     const struct type* ret_type,
-    struct ast* args)
+    const struct ast* args)
 {
-    [[maybe_unused]] size_t arg_count = ast_list_size(args);
-    assert(is_viable_candidate(candidate->type, args, arg_count));
-    assert(is_viable_candidate(other->type, args, arg_count));
-
+    assert(is_viable_candidate(candidate->type, args, ast_list_size(args)));
+    assert(is_viable_candidate(other->type, args, ast_list_size(args)));
     bool is_better = false;
-    size_t i = 0;
-    for (struct ast* arg = args; arg; arg = arg->next, i++) {
-        enum coercion_rank candidate_rank = coercion_rank_for_arg(i, arg->type, candidate->type);
-        enum coercion_rank other_rank     = coercion_rank_for_arg(i, arg->type, other->type);
+    size_t arg_index = 0;
+    for (const struct ast* arg = args; arg; arg = arg->next, arg_index++) {
+        enum coercion_rank candidate_rank = COERCION_ELLIPSIS;
+        enum coercion_rank other_rank     = COERCION_ELLIPSIS;
+        if (arg_index < candidate->type->func_type.param_count)
+            candidate_rank = type_coercion_rank(arg->type, candidate->type->func_type.params[arg_index].type);
+        if (arg_index < other->type->func_type.param_count)
+            other_rank = type_coercion_rank(arg->type, other->type->func_type.params[arg_index].type);
         if (candidate_rank < other_rank)
             return false;
-        is_better |= candidate_rank > other_rank;
+        is_better |= candidate_rank >= other_rank;
     }
-    if (ret_type && !is_better) {
-        is_better |=
-            type_coercion_rank(candidate->type->func_type.ret_type, ret_type) >
-            type_coercion_rank(other->type->func_type.ret_type, ret_type);
-    }
-    return is_better;
-}
-
-static bool is_best_candidate(
-    struct ast* candidate,
-    struct ast** candidates,
-    size_t candidate_count,
-    const struct type* ret_type,
-    struct ast* args)
-{
-    for (size_t i = 0; i < candidate_count; ++i) {
-        if (candidate == candidates[i])
-            continue;
-        if (!is_better_candidate(candidate, candidates[i], ret_type, args))
-            return false;
-    }
-    return true;
+    if (is_better)
+        return true;
+    if (!ret_type)
+        return false;
+    return
+        type_coercion_rank(candidate->type->func_type.ret_type, ret_type) >
+        type_coercion_rank(other->type->func_type.ret_type, ret_type);
 }
 
 static struct ast* find_best_candidate(
@@ -533,41 +593,19 @@ static struct ast* find_best_candidate(
     const struct type* ret_type,
     struct ast* args)
 {
+    struct ast* best_candidate = candidates[0];
+    for (size_t i = 1; i < candidate_count; ++i) {
+        if (is_better_candidate(candidates[i], best_candidate, ret_type, args))
+            best_candidate = candidates[i];
+    }
     for (size_t i = 0; i < candidate_count; ++i) {
-        if (is_best_candidate(candidates[i], candidates, candidate_count, ret_type, args))
-            return candidates[i];
+        if (candidates[i] == best_candidate)
+            continue;
+        // Exit if an ambiguity is detected (when neither candidate is the best).
+        if (is_better_candidate(candidates[i], best_candidate, ret_type, args))
+            return NULL;
     }
-    return NULL;
-}
-
-static void print_candidates(struct type_checker* type_checker, struct ast* const* candidates, size_t candidate_count) {
-    for (size_t i = 0; i < candidate_count; ++i) {
-        char* candidate_type_string = type_to_string(candidates[i]->type, &type_checker->type_print_options);
-        log_note(type_checker->log, &candidates[i]->loc, "candidate with type '%s'", candidate_type_string);
-        free(candidate_type_string);
-    }
-}
-
-static inline char* call_signature_to_string(
-    const struct type* ret_type,
-    struct ast* args,
-    const struct type_print_options* type_print_options)
-{
-    struct mem_stream mem_stream;
-    mem_stream_init(&mem_stream);
-    if (ret_type) {
-        type_print(mem_stream.file, ret_type, type_print_options);
-        fputc(' ', mem_stream.file);
-    }
-    fputc('(', mem_stream.file);
-    for (struct ast* arg = args; arg; arg = arg->next) {
-        type_print(mem_stream.file, arg->type, type_print_options);
-        if (arg->next)
-            fputs(", ", mem_stream.file);
-    }
-    fputc(')', mem_stream.file);
-    mem_stream_destroy(&mem_stream);
-    return mem_stream.buf;
+    return best_candidate;
 }
 
 static struct ast* find_func_from_candidates(
@@ -586,20 +624,22 @@ static struct ast* find_func_from_candidates(
 
     size_t viable_count = remove_non_viable_candidates(candidates, candidate_count, args);
     if (viable_count == 0) {
-        char* call_signature_string = call_signature_to_string(ret_type, args, &type_checker->type_print_options);
-        log_error(type_checker->log, loc, "no viable candidate for call to '%s' with signature '%s'",
-            func_name, call_signature_string);
-        print_candidates(type_checker, candidates, candidate_count);
-        free(call_signature_string);
+        report_overload_error(
+            type_checker, loc, "no viable candidate for", func_name, candidates, candidate_count, ret_type, args);
         return NULL;
     } else if (viable_count == 1) {
         return candidates[0];
     }
 
-    struct ast* symbol = find_best_candidate(candidates, viable_count, ret_type, args);
+    // Try without the return type first.
+    struct ast* symbol = find_best_candidate(candidates, viable_count, NULL, args);
+    if (!symbol && ret_type) {
+        // Try once more with the return type, if we have one available.
+        symbol = find_best_candidate(candidates, viable_count, ret_type, args);
+    }
     if (!symbol) {
-        log_error(type_checker->log, loc, "ambiguous call to '%s'", func_name);
-        print_candidates(type_checker, candidates, viable_count);
+        report_overload_error(
+            type_checker, loc, "ambiguous", func_name, candidates, viable_count, ret_type, args);
     }
     return symbol;
 }
@@ -739,17 +779,6 @@ static const struct type* check_compound_expr(
     return ast->type = last->type;
 }
 
-static const struct type* check_array_init(
-    struct type_checker* type_checker,
-    struct ast* elems,
-    const struct type* elem_type)
-{
-    size_t elem_count = 0;
-    for (struct ast* elem = elems; elem; elem = elem->next, elem_count++)
-        check_expr(type_checker, elem, elem_type);
-    return type_table_make_sized_array_type(type_checker->type_table, elem_type, elem_count);
-}
-
 static void check_struct_init(
     struct type_checker* type_checker,
     const struct file_loc* loc,
@@ -764,9 +793,7 @@ static void check_struct_init(
             expected_type->struct_type.field_count, type_string, elem_count);
         free(type_string);
     } else if (elem_count < expected_type->struct_type.field_count) {
-        // Only report one missing field, to avoid bloating the log
-        const char* missing_field_name = expected_type->struct_type.fields[elem_count].name;
-        log_warn(type_checker->log, loc, "missing initializer for field '%s'", missing_field_name);
+        report_missing_field(type_checker, loc, expected_type, elem_count);
     }
 
     size_t field_index = 0;
@@ -810,22 +837,15 @@ static const struct type* check_compound_init(
     struct ast* ast,
     const struct type* expected_type)
 {
-    if (!expected_type) {
-        log_error(type_checker->log, &ast->loc,
-            "compound initializers are only allowed where a structure, vector, point, normal, color, matrix, or array type is required");
-        return ast->type = type_table_make_error_type(type_checker->type_table);
+    struct small_type_vec elem_types;
+    small_type_vec_init(&elem_types);
+    for (struct ast* elem = ast->compound_init.elems; elem; elem = elem->next) {
+        const struct type* elem_type = check_expr(type_checker, elem, NULL);
+        small_type_vec_push(&elem_types, &elem_type);
     }
-
-    if (expected_type->tag == TYPE_ARRAY)  {
-        ast->type = check_array_init(type_checker, ast->compound_init.elems, expected_type->array_type.elem_type);
-        return coerce_expr(type_checker, ast, expected_type);
-    } else if (expected_type->tag == TYPE_STRUCT || expected_type->tag == TYPE_PRIM) {
-        ast->type = check_constructor_call(type_checker, &ast->loc, expected_type, ast->compound_init.elems);
-        return coerce_expr(type_checker, ast, expected_type);
-    } else {
-        report_invalid_type_with_msg(type_checker, &ast->loc, expected_type, "compound-initializable");
-        return ast->type = type_table_make_error_type(type_checker->type_table);
-    }
+    ast->type = type_table_make_compound_type(type_checker->type_table, elem_types.elems, elem_types.elem_count);
+    small_type_vec_destroy(&elem_types);
+    return coerce_expr(type_checker, ast, expected_type);
 }
 
 static const struct type* check_construct_expr(

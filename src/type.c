@@ -20,36 +20,103 @@ SMALL_VEC_IMPL(small_func_param_vec, struct func_param, PUBLIC)
 enum coercion_rank type_coercion_rank(const struct type* from, const struct type* to) {
     if (from == to)
         return COERCION_EXACT;
+
+    if (type_is_prim_type(to, PRIM_TYPE_BOOL) && from->tag == TYPE_CLOSURE)
+        return COERCION_TO_BOOL;
+
     if (from->tag == TYPE_PRIM && to->tag == TYPE_PRIM) {
-        if (to->prim_type == PRIM_TYPE_INT && from->prim_type == PRIM_TYPE_BOOL)
-            return COERCION_BOOL_TO_INT;
-        if (to->prim_type == PRIM_TYPE_FLOAT) {
-            if (from->prim_type == PRIM_TYPE_BOOL)
-                return COERCION_BOOL_TO_FLOAT;
-            if (from->prim_type == PRIM_TYPE_INT)
-                return COERCION_INT_TO_FLOAT;
-        }
-        if (type_is_triple(to) && type_is_triple(from)) {
-            if (type_is_point_like(to) && type_is_point_like(from))
-                return COERCION_POINT_LIKE;
-            return COERCION_TRIPLE;
-        }
-        if (from->prim_type == PRIM_TYPE_BOOL ||
-            from->prim_type == PRIM_TYPE_INT ||
-            from->prim_type == PRIM_TYPE_FLOAT)
-        {
-            if (type_is_triple(to))
-                return COERCION_SCALAR_TO_TRIPLE;
-            if (to->prim_type == PRIM_TYPE_MATRIX)
-                return COERCION_SCALAR_TO_MATRIX;
-        }
+        static const enum coercion_rank rank_matrix[PRIM_TYPE_COUNT][PRIM_TYPE_COUNT] = {
+            [PRIM_TYPE_BOOL  ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
+            [PRIM_TYPE_INT   ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
+            [PRIM_TYPE_FLOAT ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
+            [PRIM_TYPE_BOOL  ][PRIM_TYPE_COLOR ] = COERCION_SCALAR_TO_COLOR,
+            [PRIM_TYPE_INT   ][PRIM_TYPE_COLOR ] = COERCION_SCALAR_TO_COLOR,
+            [PRIM_TYPE_FLOAT ][PRIM_TYPE_COLOR ] = COERCION_SCALAR_TO_COLOR,
+            [PRIM_TYPE_BOOL  ][PRIM_TYPE_VECTOR] = COERCION_SCALAR_TO_VECTOR,
+            [PRIM_TYPE_INT   ][PRIM_TYPE_VECTOR] = COERCION_SCALAR_TO_VECTOR,
+            [PRIM_TYPE_FLOAT ][PRIM_TYPE_VECTOR] = COERCION_SCALAR_TO_VECTOR,
+            [PRIM_TYPE_BOOL  ][PRIM_TYPE_POINT ] = COERCION_SCALAR_TO_POINT,
+            [PRIM_TYPE_INT   ][PRIM_TYPE_POINT ] = COERCION_SCALAR_TO_POINT,
+            [PRIM_TYPE_FLOAT ][PRIM_TYPE_POINT ] = COERCION_SCALAR_TO_POINT,
+            [PRIM_TYPE_BOOL  ][PRIM_TYPE_NORMAL] = COERCION_SCALAR_TO_NORMAL,
+            [PRIM_TYPE_INT   ][PRIM_TYPE_NORMAL] = COERCION_SCALAR_TO_NORMAL,
+            [PRIM_TYPE_FLOAT ][PRIM_TYPE_NORMAL] = COERCION_SCALAR_TO_NORMAL,
+            [PRIM_TYPE_COLOR ][PRIM_TYPE_VECTOR] = COERCION_COLOR_TO_VECTOR,
+            [PRIM_TYPE_COLOR ][PRIM_TYPE_POINT ] = COERCION_COLOR_TO_POINT,
+            [PRIM_TYPE_COLOR ][PRIM_TYPE_NORMAL] = COERCION_COLOR_TO_NORMAL,
+            [PRIM_TYPE_NORMAL][PRIM_TYPE_COLOR ] = COERCION_SPATIAL_TO_COLOR,
+            [PRIM_TYPE_POINT ][PRIM_TYPE_COLOR ] = COERCION_SPATIAL_TO_COLOR,
+            [PRIM_TYPE_VECTOR][PRIM_TYPE_COLOR ] = COERCION_SPATIAL_TO_COLOR,
+            [PRIM_TYPE_POINT ][PRIM_TYPE_VECTOR] = COERCION_SPATIAL_TO_VECTOR,
+            [PRIM_TYPE_NORMAL][PRIM_TYPE_VECTOR] = COERCION_SPATIAL_TO_VECTOR,
+            [PRIM_TYPE_VECTOR][PRIM_TYPE_NORMAL] = COERCION_SPATIAL_TO_NORMAL,
+            [PRIM_TYPE_POINT ][PRIM_TYPE_NORMAL] = COERCION_SPATIAL_TO_NORMAL,
+            [PRIM_TYPE_NORMAL][PRIM_TYPE_POINT ] = COERCION_SPATIAL_TO_POINT,
+            [PRIM_TYPE_VECTOR][PRIM_TYPE_POINT ] = COERCION_SPATIAL_TO_POINT,
+            [PRIM_TYPE_MATRIX][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
+            [PRIM_TYPE_NORMAL][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
+            [PRIM_TYPE_POINT ][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
+            [PRIM_TYPE_VECTOR][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
+            [PRIM_TYPE_COLOR ][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
+            [PRIM_TYPE_STRING][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
+            [PRIM_TYPE_FLOAT ][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
+            [PRIM_TYPE_INT   ][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
+            [PRIM_TYPE_INT   ][PRIM_TYPE_FLOAT ] = COERCION_TO_FLOAT,
+            [PRIM_TYPE_BOOL  ][PRIM_TYPE_FLOAT ] = COERCION_TO_FLOAT,
+            [PRIM_TYPE_BOOL  ][PRIM_TYPE_INT   ] = COERCION_TO_INT
+        };
+        return rank_matrix[from->prim_type][to->prim_type];
     }
-    if (from->tag == TYPE_ARRAY && to->tag == TYPE_ARRAY) {
-        if (from->array_type.elem_type == to->array_type.elem_type &&
-            (from->array_type.elem_count == 0 || (from->array_type.elem_count <= to->array_type.elem_count)))
-            return COERCION_ARRAY;
+
+    if (from->tag == TYPE_ARRAY && to->tag == TYPE_ARRAY &&
+        from->array_type.elem_type == to->array_type.elem_type &&
+        (from->array_type.elem_count == 0 || (from->array_type.elem_count <= to->array_type.elem_count)))
+    {
+        return COERCION_TO_ARRAY;
     }
+
+    if (from->tag == TYPE_COMPOUND && to->tag == TYPE_STRUCT &&
+        from->compound_type.elem_count <= to->struct_type.field_count)
+    {
+        enum coercion_rank min_rank =
+            from->compound_type.elem_count == to->struct_type.field_count ? COERCION_EXACT : COERCION_ELLIPSIS;
+        for (size_t i = 0; i < from->compound_type.elem_count; ++i) {
+            enum coercion_rank rank = type_coercion_rank(
+                from->compound_type.elem_types[i],
+                to->struct_type.fields[i].type);
+            min_rank = min_rank < rank ? min_rank : rank;
+        }
+        return min_rank;
+    }
+
+    if (from->tag == TYPE_COMPOUND && to->tag == TYPE_ARRAY &&
+        (to->array_type.elem_count == 0 || from->compound_type.elem_count <= to->array_type.elem_count))
+    {
+        enum coercion_rank min_rank =
+            to->array_type.elem_count == 0 || (from->compound_type.elem_count == to->array_type.elem_count)
+            ? COERCION_EXACT : COERCION_ELLIPSIS;
+        for (size_t i = 0; i < from->compound_type.elem_count; ++i) {
+            enum coercion_rank rank = type_coercion_rank(
+                from->compound_type.elem_types[i],
+                to->array_type.elem_type);
+            min_rank = min_rank < rank ? min_rank : rank;
+        }
+        return min_rank;
+    }
+
     return COERCION_IMPOSSIBLE;
+}
+
+bool type_coercion_is_lossy(const struct type* from, const struct type* to) {
+    assert(type_is_coercible_to(from, to));
+    return type_is_prim_type(from, PRIM_TYPE_INT) && type_is_prim_type(to, PRIM_TYPE_FLOAT);
+}
+
+bool type_coercion_is_incomplete(const struct type* from, const struct type* to) {
+    assert(type_is_coercible_to(from, to));
+    return
+        from->tag == TYPE_COMPOUND && to->tag == TYPE_STRUCT &&
+        from->compound_type.elem_count < to->struct_type.field_count;
 }
 
 bool type_is_unsized_array(const struct type* type) {
@@ -168,6 +235,15 @@ static void print(FILE* file, const struct type* type, const struct styles* styl
                     fputs(", ", file);
             }
             fputs(")", file);
+            break;
+        case TYPE_COMPOUND:
+            fputs("{ ", file);
+            for (size_t i = 0; i < type->compound_type.elem_count; ++i) {
+                print(file, type->compound_type.elem_types[i], styles);
+                if (i != type->compound_type.elem_count - 1)
+                    fputs(", ", file);
+            }
+            fputs(" }", file);
             break;
         case TYPE_STRUCT:
             fputs(type->struct_type.name, file);

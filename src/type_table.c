@@ -31,6 +31,11 @@ static inline uint32_t hash_type(uint32_t h, const struct type* const* type_ptr)
                 h = hash_uint8(h, type->func_type.params[i].is_output);
             }
             break;
+        case TYPE_COMPOUND:
+            h = hash_uint64(h, type->compound_type.elem_count);
+            for (size_t i = 0; i < type->compound_type.elem_count; ++i)
+                h = hash_uint64(h, type->compound_type.elem_types[i]->id);
+            break;
         case TYPE_STRUCT:
             return type->id;
         default:
@@ -66,6 +71,13 @@ static inline bool is_type_equal(
                     type->func_type.params,
                     other->func_type.params,
                     sizeof(struct func_param) * type->func_type.param_count);
+        case TYPE_COMPOUND:
+            return
+                type->compound_type.elem_count == other->compound_type.elem_count &&
+                !memcmp(
+                    type->compound_type.elem_types,
+                    other->compound_type.elem_types,
+                    sizeof(const struct type*) * type->compound_type.elem_count);
         default:
             return type == other;
     }
@@ -104,10 +116,19 @@ static inline struct func_param* copy_func_params(
     const struct func_param* params,
     size_t param_count)
 {
-    size_t params_size = sizeof(struct func_param) * param_count;
-    struct func_param* new_params = mem_pool_alloc(mem_pool, params_size, alignof(struct func_param));
-    memcpy(new_params, params, params_size);
+    struct func_param* new_params = MEM_POOL_ALLOC_ARRAY(*mem_pool, param_count, struct func_param);
+    xmemcpy(new_params, params, sizeof(struct func_param) * param_count);
     return new_params;
+}
+
+static inline const struct type** copy_types(
+    struct mem_pool* mem_pool,
+    const struct type* const* types,
+    size_t type_count)
+{
+    const struct type** new_types = MEM_POOL_ALLOC_ARRAY(*mem_pool, type_count, const struct type*);
+    xmemcpy(new_types, types, sizeof(const struct type*) * type_count);
+    return new_types;
 }
 
 static const struct type* insert_type(struct type_table* type_table, const struct type* type) {
@@ -124,18 +145,21 @@ static const struct type* insert_type(struct type_table* type_table, const struc
             type_table->mem_pool,
             type->func_type.params,
             type->func_type.param_count);
+    } else if (type->tag == TYPE_COMPOUND) {
+        new_type->compound_type.elem_types = copy_types(
+            type_table->mem_pool,
+            type->compound_type.elem_types,
+            type->compound_type.elem_count);
     }
     return register_type(type_table, new_type);
 }
 
 struct type* type_table_create_struct_type(struct type_table* type_table, size_t field_count) {
-    struct type* type = mem_pool_alloc(type_table->mem_pool, sizeof(struct type), alignof(struct type));
+    struct type* type = MEM_POOL_ALLOC(*type_table->mem_pool, struct type);
     memset(type, 0, sizeof(struct type));
     type->id = type_table->types.elem_count;
     type->tag = TYPE_STRUCT;
-    type->struct_type.fields = mem_pool_alloc(type_table->mem_pool,
-        sizeof(struct struct_field) * field_count,
-        alignof(struct struct_field));
+    type->struct_type.fields = MEM_POOL_ALLOC_ARRAY(*type_table->mem_pool, field_count, struct struct_field);
     memset(type->struct_type.fields, 0, sizeof(struct struct_field) * field_count);
     type->struct_type.field_count = field_count;
     register_type(type_table, type);
@@ -218,6 +242,20 @@ const struct type* type_table_make_func_type(
             .params = params,
             .param_count = param_count,
             .has_ellipsis = has_ellipsis
+        }
+    });
+}
+
+const struct type* type_table_make_compound_type(
+    struct type_table* type_table,
+    const struct type* const* elem_types,
+    size_t elem_count)
+{
+    return insert_type(type_table, &(struct type) {
+        .tag = TYPE_COMPOUND,
+        .compound_type = {
+            .elem_types = elem_types,
+            .elem_count = elem_count
         }
     });
 }

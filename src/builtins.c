@@ -29,56 +29,6 @@ static inline void append_builtin(struct ast** builtin_list, struct ast* builtin
     *builtin_list = builtin;
 }
 
-static struct ast* make_triple_constructor_from_float(struct builtins* builtins, enum prim_type_tag tag) {
-    const struct type* float_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT);
-    const struct type* triple_type = type_table_make_prim_type(builtins->type_table, tag);
-    struct func_param func_params[] = { { float_type, false } };
-    return alloc_builtin(builtins, prim_type_tag_to_string(tag),
-        type_table_make_func_type(builtins->type_table, triple_type, func_params, 1, false));
-}
-
-static struct ast* make_triple_constructor_from_components(struct builtins* builtins, enum prim_type_tag tag) {
-    const struct type* float_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT);
-    const struct type* triple_type = type_table_make_prim_type(builtins->type_table, tag);
-    struct func_param func_params[] = {
-        { float_type, false },
-        { float_type, false },
-        { float_type, false },
-    };
-    return alloc_builtin(builtins, prim_type_tag_to_string(tag),
-        type_table_make_func_type(builtins->type_table, triple_type, func_params, 3, false));
-}
-
-static struct ast* make_triple_constructor_from_triple(struct builtins* builtins, enum prim_type_tag tag, enum prim_type_tag other_tag) {
-    const struct type* triple_type = type_table_make_prim_type(builtins->type_table, tag);
-    const struct type* other_type = type_table_make_prim_type(builtins->type_table, other_tag);
-    struct func_param func_params[] = { { other_type, false } };
-    return alloc_builtin(builtins, prim_type_tag_to_string(tag),
-        type_table_make_func_type(builtins->type_table, triple_type, func_params, 1, false));
-}
-
-static struct ast* make_triple_constructor_with_space(struct builtins* builtins, enum prim_type_tag tag) {
-    const struct type* float_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT);
-    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
-    const struct type* triple_type = type_table_make_prim_type(builtins->type_table, tag);
-    struct func_param func_params[] = {
-        { string_type, false },
-        { float_type, false },
-        { float_type, false },
-        { float_type, false },
-    };
-    return alloc_builtin(builtins, prim_type_tag_to_string(tag),
-        type_table_make_func_type(builtins->type_table, triple_type, func_params, 4, false));
-}
-
-static struct ast* make_scalar_constructor(struct builtins* builtins, enum prim_type_tag tag, enum prim_type_tag other_tag) {
-    const struct type* type = type_table_make_prim_type(builtins->type_table, tag);
-    const struct type* other_type  = type_table_make_prim_type(builtins->type_table, other_tag);
-    struct func_param func_params[1] = { { other_type, false } };
-    return alloc_builtin(builtins, prim_type_tag_to_string(tag),
-        type_table_make_func_type(builtins->type_table, type, func_params, 1, false));
-}
-
 static struct ast* make_binary_operator(
     struct builtins* builtins,
     const char* name,
@@ -111,10 +61,67 @@ static struct ast* make_unary_operator(
         type_table_make_func_type(builtins->type_table, ret_type, func_params, 1, false));
 }
 
+static struct ast* make_single_param_constructor(struct builtins* builtins, enum prim_type_tag arg_tag, enum prim_type_tag ret_tag) {
+    return make_unary_operator(builtins, prim_type_tag_to_string(ret_tag), arg_tag, ret_tag, false);
+}
+
+static struct ast* make_triple_constructor_from_components(struct builtins* builtins, enum prim_type_tag tag, bool has_space) {
+    const struct type* float_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT);
+    const struct type* string_type = has_space ? type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING) : NULL;
+    const struct type* triple_type = type_table_make_prim_type(builtins->type_table, tag);
+    struct func_param func_params[] = {
+        { string_type, false },
+        { float_type, false },
+        { float_type, false },
+        { float_type, false },
+    };
+    return alloc_builtin(builtins, prim_type_tag_to_string(tag),
+        type_table_make_func_type(builtins->type_table, triple_type, func_params + (has_space ? 0 : 1), has_space ? 4 : 3, false));
+}
+
+static struct ast* make_triple_constructor_from_triple(struct builtins* builtins, enum prim_type_tag tag, enum prim_type_tag other_tag) {
+    const struct type* triple_type = type_table_make_prim_type(builtins->type_table, tag);
+    const struct type* other_type = type_table_make_prim_type(builtins->type_table, other_tag);
+    struct func_param func_params[] = { { other_type, false } };
+    return alloc_builtin(builtins, prim_type_tag_to_string(tag),
+        type_table_make_func_type(builtins->type_table, triple_type, func_params, 1, false));
+}
+
+static struct ast* make_matrix_constructor_from_components(struct builtins* builtins, bool has_space) {
+    const struct type* float_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT);
+    const struct type* string_type = has_space ? type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING) : NULL;
+    const struct type* matrix_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_MATRIX);
+    struct func_param func_params[] = {
+        { string_type, false },
+
+        { float_type, false },
+        { float_type, false },
+        { float_type, false },
+        { float_type, false },
+
+        { float_type, false },
+        { float_type, false },
+        { float_type, false },
+        { float_type, false },
+
+        { float_type, false },
+        { float_type, false },
+        { float_type, false },
+        { float_type, false },
+
+        { float_type, false },
+        { float_type, false },
+        { float_type, false },
+        { float_type, false },
+    };
+    return alloc_builtin(builtins, "matrix",
+        type_table_make_func_type(builtins->type_table, matrix_type, func_params + (has_space ? 0 : 1), has_space ? 17 : 16, false));
+}
+
 static void register_triple_constructors(struct builtins* builtins, enum prim_type_tag tag) {
-    append_builtin(&builtins->constructors[tag], make_triple_constructor_from_float(builtins, tag));
-    append_builtin(&builtins->constructors[tag], make_triple_constructor_from_components(builtins, tag));
-    append_builtin(&builtins->constructors[tag], make_triple_constructor_with_space(builtins, tag));
+    append_builtin(&builtins->constructors[tag], make_single_param_constructor(builtins, PRIM_TYPE_FLOAT, tag));
+    append_builtin(&builtins->constructors[tag], make_triple_constructor_from_components(builtins, tag, false));
+    append_builtin(&builtins->constructors[tag], make_triple_constructor_from_components(builtins, tag, true));
     append_builtin(&builtins->constructors[tag], make_triple_constructor_from_triple(builtins, tag, PRIM_TYPE_COLOR));
     append_builtin(&builtins->constructors[tag], make_triple_constructor_from_triple(builtins, tag, PRIM_TYPE_VECTOR));
     append_builtin(&builtins->constructors[tag], make_triple_constructor_from_triple(builtins, tag, PRIM_TYPE_POINT));
@@ -122,9 +129,15 @@ static void register_triple_constructors(struct builtins* builtins, enum prim_ty
 }
 
 static void register_scalar_constructors(struct builtins* builtins, enum prim_type_tag tag) {
-    append_builtin(&builtins->constructors[tag], make_scalar_constructor(builtins, tag, PRIM_TYPE_FLOAT));
-    append_builtin(&builtins->constructors[tag], make_scalar_constructor(builtins, tag, PRIM_TYPE_INT));
-    append_builtin(&builtins->constructors[tag], make_scalar_constructor(builtins, tag, PRIM_TYPE_BOOL));
+    append_builtin(&builtins->constructors[tag], make_single_param_constructor(builtins, PRIM_TYPE_FLOAT, tag));
+    append_builtin(&builtins->constructors[tag], make_single_param_constructor(builtins, PRIM_TYPE_INT, tag));
+    append_builtin(&builtins->constructors[tag], make_single_param_constructor(builtins, PRIM_TYPE_BOOL, tag));
+}
+
+static void register_matrix_constructors(struct builtins* builtins) {
+    append_builtin(&builtins->constructors[PRIM_TYPE_MATRIX], make_single_param_constructor(builtins, PRIM_TYPE_FLOAT, PRIM_TYPE_MATRIX));
+    append_builtin(&builtins->constructors[PRIM_TYPE_MATRIX], make_matrix_constructor_from_components(builtins, false));
+    append_builtin(&builtins->constructors[PRIM_TYPE_MATRIX], make_matrix_constructor_from_components(builtins, true));
 }
 
 static void register_scalar_operators(struct builtins* builtins, enum prim_type_tag tag) {
@@ -138,11 +151,13 @@ static void register_scalar_operators(struct builtins* builtins, enum prim_type_
         append_builtin(&builtins->operators, make_unary_operator(builtins, "__operator__pre_dec__", tag, tag, true));
         append_builtin(&builtins->operators, make_unary_operator(builtins, "__operator__post_inc__", tag, tag, true));
         append_builtin(&builtins->operators, make_unary_operator(builtins, "__operator__post_dec__", tag, tag, true));
+        append_builtin(&builtins->operators, make_unary_operator(builtins, "__operator__neg__", tag, tag, false));
+    }
+    if (tag == PRIM_TYPE_INT || tag == PRIM_TYPE_FLOAT || tag == PRIM_TYPE_STRING) {
         append_builtin(&builtins->operators, make_binary_operator(builtins, "__operator__lt__", tag, tag, PRIM_TYPE_BOOL));
         append_builtin(&builtins->operators, make_binary_operator(builtins, "__operator__le__", tag, tag, PRIM_TYPE_BOOL));
         append_builtin(&builtins->operators, make_binary_operator(builtins, "__operator__gt__", tag, tag, PRIM_TYPE_BOOL));
         append_builtin(&builtins->operators, make_binary_operator(builtins, "__operator__ge__", tag, tag, PRIM_TYPE_BOOL));
-        append_builtin(&builtins->operators, make_unary_operator(builtins, "__operator__neg__", tag, tag, false));
     }
     if (tag == PRIM_TYPE_INT || tag == PRIM_TYPE_BOOL) {
         append_builtin(&builtins->operators, make_unary_operator(builtins, "__operator__not__", tag, tag, false));
@@ -181,14 +196,17 @@ struct builtins* builtins_create(struct type_table* type_table) {
     register_triple_constructors(builtins, PRIM_TYPE_POINT);
     register_triple_constructors(builtins, PRIM_TYPE_NORMAL);
 
+    register_matrix_constructors(builtins);
+
     register_scalar_operators(builtins, PRIM_TYPE_BOOL);
     register_scalar_operators(builtins, PRIM_TYPE_INT);
     register_scalar_operators(builtins, PRIM_TYPE_FLOAT);
+    register_scalar_operators(builtins, PRIM_TYPE_STRING);
 
     register_matrix_or_triple_operators(builtins, PRIM_TYPE_COLOR);
     register_matrix_or_triple_operators(builtins, PRIM_TYPE_VECTOR);
     register_matrix_or_triple_operators(builtins, PRIM_TYPE_POINT);
-    register_matrix_or_triple_operators(builtins, PRIM_TYPE_COLOR);
+    register_matrix_or_triple_operators(builtins, PRIM_TYPE_NORMAL);
     register_matrix_or_triple_operators(builtins, PRIM_TYPE_MATRIX);
 
     return builtins;

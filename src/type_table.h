@@ -24,3 +24,8 @@ void type_table_finalize_struct_type(struct type_table*, struct type*);
     const struct func_param* params,
     size_t param_count,
     bool has_ellipsis);
+
+[[nodiscard]] const struct type* type_table_make_compound_type(
+    struct type_table*,
+    const struct type* const* elem_types,
+    size_t elem_count);

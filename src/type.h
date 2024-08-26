@@ -13,6 +13,7 @@ enum type_tag {
     TYPE_SHADER,
     TYPE_ARRAY,
     TYPE_FUNC,
+    TYPE_COMPOUND,
     TYPE_STRUCT
 };
 
@@ -46,6 +47,10 @@ struct type {
             bool has_ellipsis;
         } func_type;
         struct {
+            const struct type* const* elem_types;
+            size_t elem_count;
+        } compound_type;
+        struct {
             struct struct_field* fields;
             size_t field_count;
             const char* name;
@@ -56,21 +61,35 @@ struct type {
 enum coercion_rank {
     COERCION_IMPOSSIBLE,
     COERCION_ELLIPSIS,
+
     COERCION_SCALAR_TO_MATRIX,
-    COERCION_SCALAR_TO_TRIPLE,
-    COERCION_TRIPLE,
-    COERCION_POINT_LIKE,
-    COERCION_ARRAY,
-    COERCION_INT_TO_FLOAT,
-    COERCION_BOOL_TO_FLOAT,
-    COERCION_BOOL_TO_INT,
-    COERCION_EXACT
+    COERCION_SCALAR_TO_COLOR,
+    COERCION_SCALAR_TO_VECTOR,
+    COERCION_SCALAR_TO_POINT,
+    COERCION_SCALAR_TO_NORMAL,
+
+    COERCION_COLOR_TO_VECTOR,
+    COERCION_COLOR_TO_POINT,
+    COERCION_COLOR_TO_NORMAL,
+    COERCION_SPATIAL_TO_COLOR,
+    COERCION_SPATIAL_TO_VECTOR,
+    COERCION_SPATIAL_TO_POINT,
+    COERCION_SPATIAL_TO_NORMAL,
+
+    COERCION_TO_ARRAY,
+    COERCION_TO_BOOL,
+    COERCION_TO_FLOAT,
+    COERCION_TO_INT,
+
+    COERCION_EXACT = 100
 };
 
 SMALL_VEC_DECL(small_type_vec, const struct type*, PUBLIC)
 SMALL_VEC_DECL(small_func_param_vec, struct func_param, PUBLIC)
 
 [[nodiscard]] enum coercion_rank type_coercion_rank(const struct type*, const struct type*);
+[[nodiscard]] bool type_coercion_is_lossy(const struct type*, const struct type*);
+[[nodiscard]] bool type_coercion_is_incomplete(const struct type*, const struct type*);
 
 [[nodiscard]] bool type_is_unsized_array(const struct type*);
 [[nodiscard]] bool type_is_void(const struct type*);
