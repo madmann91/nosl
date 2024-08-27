@@ -259,6 +259,9 @@ static void print(
         case AST_ERROR:
             fprintf(file, "%s<error>%s", styles->error, styles->reset);
             break;
+        case AST_BUILTIN:
+            fprintf(file, "%s<builtin %s>%s", styles->error, ast->builtin.name, styles->reset);
+            break;
         case AST_METADATUM:
             print(file, indent, ast->metadatum.type, styles);
             fprintf(file, " %s = ", ast->metadatum.name);
