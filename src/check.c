@@ -118,12 +118,28 @@ static inline void report_missing_field(
     struct type_checker* type_checker,
     const struct file_loc* loc,
     const struct type* type,
-    size_t field_index)
+    size_t field_index,
+    bool is_error)
 {
     // Only report one missing field, to avoid bloating the log
     assert(type->tag == TYPE_STRUCT);
-    log_warn(type_checker->log, loc, "missing initializer for field '%s'",
-        type->struct_type.fields[field_index].name);
+    log_msg(is_error ? MSG_ERROR : MSG_WARN, type_checker->log, loc,
+        "missing initializer for field '%s' in type '%s'",
+        type->struct_type.fields[field_index].name, type->struct_type.name);
+}
+
+static inline void report_too_many_fields(
+    struct type_checker* type_checker,
+    const struct file_loc* loc,
+    const struct type* type,
+    size_t field_count)
+{
+    assert(type->tag == TYPE_STRUCT);
+    log_error(type_checker->log, loc,
+        "expected %zu %s for type '%s', but got %zu",
+        type->struct_type.field_count,
+        type->struct_type.field_count > 1 ? "initializers" : "initializer",
+        type->struct_type.name, field_count);
 }
 
 static inline void report_lossy_coercion(
@@ -147,7 +163,7 @@ static inline void report_incomplete_coercion(
     const struct type* expected_type)
 {
     if (type->tag == TYPE_COMPOUND && expected_type->tag == TYPE_STRUCT)
-        report_missing_field(type_checker, loc, expected_type, type->compound_type.elem_count);
+        report_missing_field(type_checker, loc, expected_type, type->compound_type.elem_count, false);
 }
 
 static inline void insert_symbol(
@@ -512,6 +528,10 @@ static const struct type* check_ident_expr(
         small_ast_vec_destroy(&all_symbols);
         return type_table_make_error_type(type_checker->type_table);
     }
+    if (symbol->tag == AST_FUNC_DECL || symbol->tag == AST_STRUCT_DECL) {
+        log_error(type_checker->log, &ast->loc, "cannot use %s '%s' as value",
+            symbol->tag == AST_FUNC_DECL ? "function" : "structure", ast->ident_expr.name);
+    }
     ast->ident_expr.symbol = symbol;
     ast->type = symbol->type;
     return coerce_expr(type_checker, ast, expected_type);
@@ -644,7 +664,7 @@ static struct ast* find_func_from_candidates(
     return symbol;
 }
 
-static struct ast* find_func_with_name(
+static struct ast* find_func_or_struct_with_name(
     struct type_checker* type_checker,
     const struct file_loc* loc,
     const char* func_name,
@@ -657,6 +677,8 @@ static struct ast* find_func_with_name(
     struct ast* symbol = NULL;
     if (symbols.elem_count == 0) {
         log_error(type_checker->log, loc, "unknown identifier '%s'", func_name);
+    } else if (symbols.elem_count == 1 && symbols.elems[0]->tag == AST_STRUCT_DECL) {
+        symbol = symbols.elems[0];
     } else {
         symbol = find_func_from_candidates(
             type_checker, loc, func_name, symbols.elems, symbols.elem_count, ret_type, args);
@@ -664,6 +686,25 @@ static struct ast* find_func_with_name(
 
     small_ast_vec_destroy(&symbols);
     return symbol;
+}
+
+static const struct type* check_struct_constructor(
+    struct type_checker* type_checker,
+    const struct file_loc* loc,
+    const struct type* constructor_type,
+    struct ast* args)
+{
+    assert(constructor_type->tag == TYPE_FUNC);
+    assert(constructor_type->func_type.ret_type->tag == TYPE_STRUCT);
+    size_t arg_count = ast_list_size(args);
+    if (arg_count < constructor_type->func_type.param_count) {
+        report_missing_field(type_checker, loc, constructor_type->func_type.ret_type, arg_count, true);
+        return type_table_make_error_type(type_checker->type_table);
+    } else if (arg_count > constructor_type->func_type.param_count) {
+        report_too_many_fields(type_checker, loc, constructor_type->func_type.ret_type, arg_count);
+        return type_table_make_error_type(type_checker->type_table);
+    }
+    return constructor_type;
 }
 
 static const struct type* check_callee(
@@ -676,14 +717,19 @@ static const struct type* check_callee(
     if (callee->tag != AST_IDENT_EXPR)
         return check_expr(type_checker, ast, NULL);
 
-    struct ast* symbol = find_func_with_name(
+    struct ast* symbol = find_func_or_struct_with_name(
         type_checker, &ast->loc, callee->ident_expr.name, ret_type, args);
 
-    callee->type = symbol ? symbol->type : type_table_make_error_type(type_checker->type_table);
     callee->ident_expr.symbol = symbol;
-    for (; ast != callee; ast = ast->paren_expr.inner_expr)
-        ast->type = callee->type;
-    return callee->type;
+    if (symbol) {
+        callee->type = symbol->tag == AST_STRUCT_DECL
+            ? check_struct_constructor(type_checker, &ast->loc, symbol->struct_decl.constructor_type, args)
+            : symbol->type;
+    } else {
+        callee->type = type_table_make_error_type(type_checker->type_table);
+    }
+
+    return ast->type = callee->type;
 }
 
 static inline bool check_call_args(struct type_checker* type_checker, struct ast* args) {
@@ -736,8 +782,8 @@ static const struct type* check_binary_expr(
         return ast->type = type_table_make_error_type(type_checker->type_table);
 
     const char* func_name = binary_expr_tag_to_func_name(ast->binary_expr.tag);
-    struct ast* symbol = find_func_with_name(type_checker, &ast->loc, func_name, expected_type, ast->binary_expr.args);
-    if (!symbol)
+    struct ast* symbol = find_func_or_struct_with_name(type_checker, &ast->loc, func_name, expected_type, ast->binary_expr.args);
+    if (!symbol || symbol->tag == AST_STRUCT_DECL)
         return ast->type = type_table_make_error_type(type_checker->type_table);
 
     ast->unary_expr.symbol = symbol;
@@ -757,8 +803,8 @@ static const struct type* check_unary_expr(
         return ast->type = type_table_make_error_type(type_checker->type_table);
 
     const char* func_name = unary_expr_tag_to_func_name(ast->unary_expr.tag);
-    struct ast* symbol = find_func_with_name(type_checker, &ast->loc, func_name, expected_type, ast->unary_expr.arg);
-    if (!symbol)
+    struct ast* symbol = find_func_or_struct_with_name(type_checker, &ast->loc, func_name, expected_type, ast->unary_expr.arg);
+    if (!symbol || symbol->tag == AST_STRUCT_DECL)
         return ast->type = type_table_make_error_type(type_checker->type_table);
 
     ast->unary_expr.symbol = symbol;
@@ -777,59 +823,6 @@ static const struct type* check_compound_expr(
         check_expr(type_checker, elem, ast->next ? NULL : expected_type);
     assert(last);
     return ast->type = last->type;
-}
-
-static void check_struct_init(
-    struct type_checker* type_checker,
-    const struct file_loc* loc,
-    struct ast* fields,
-    const struct type* expected_type)
-{
-    assert(expected_type->tag == TYPE_STRUCT);
-    const size_t elem_count = ast_list_size(fields);
-    if (elem_count > expected_type->struct_type.field_count) {
-        char* type_string = type_to_string(expected_type, &type_checker->type_print_options);
-        log_error(type_checker->log, loc, "expected %zu initializers for type '%s', but got %zu",
-            expected_type->struct_type.field_count, type_string, elem_count);
-        free(type_string);
-    } else if (elem_count < expected_type->struct_type.field_count) {
-        report_missing_field(type_checker, loc, expected_type, elem_count);
-    }
-
-    size_t field_index = 0;
-    for (struct ast* field = fields; field; field = field->next, field_index++) {
-        const struct type* field_type = field_index < expected_type->struct_type.field_count
-            ? expected_type->struct_type.fields[field_index].type : NULL;
-        check_expr(type_checker, field, field_type);
-    }
-}
-
-static const struct type* check_constructor_call(
-    struct type_checker* type_checker,
-    const struct file_loc* loc,
-    const struct type* type,
-    struct ast* args)
-{
-    if (type->tag == TYPE_STRUCT) {
-        check_struct_init(type_checker, loc, args, type);
-        return type;
-    } else if (type->tag == TYPE_PRIM) {
-        if (!check_call_args(type_checker, args))
-            return type_table_make_error_type(type_checker->type_table);
-
-        struct small_ast_vec candidates = builtins_list_constructors(type_checker->builtins, type->prim_type);
-        small_ast_vec_relocate(&candidates);
-        struct ast* symbol = find_func_from_candidates(
-            type_checker, loc, prim_type_tag_to_string(type->prim_type), candidates.elems, candidates.elem_count, type, args);
-        small_ast_vec_destroy(&candidates);
-        if (!symbol)
-            return type_table_make_error_type(type_checker->type_table);
-
-        return find_func_ret_type(symbol);
-    } else {
-        report_invalid_type_with_msg(type_checker, loc, type, "constructible");
-        return type_table_make_error_type(type_checker->type_table);
-    }
 }
 
 static const struct type* check_compound_init(
@@ -854,7 +847,21 @@ static const struct type* check_construct_expr(
     const struct type* expected_type)
 {
     const struct type* type = check_type(type_checker, ast->construct_expr.type);
-    ast->type = check_constructor_call(type_checker, &ast->loc, type, ast->construct_expr.args);
+    assert(type->tag == TYPE_PRIM);
+
+    if (!check_call_args(type_checker, ast->construct_expr.args))
+        return type_table_make_error_type(type_checker->type_table);
+
+    struct small_ast_vec candidates = builtins_list_constructors(type_checker->builtins, type->prim_type);
+    small_ast_vec_relocate(&candidates);
+    struct ast* symbol = find_func_from_candidates(type_checker, &ast->loc,
+        prim_type_tag_to_string(type->prim_type), candidates.elems, candidates.elem_count, type, ast->construct_expr.args);
+    small_ast_vec_destroy(&candidates);
+    if (!symbol)
+        return type_table_make_error_type(type_checker->type_table);
+
+    assert(find_func_ret_type(symbol) == type);
+    ast->type = type;
     return coerce_expr(type_checker, ast, expected_type);
 }
 
@@ -1020,6 +1027,7 @@ static void check_struct_decl(struct type_checker* type_checker, struct ast* ast
     type_table_finalize_struct_type(type_checker->type_table, struct_type);
     env_pop_scope(type_checker->env);
     ast->type = struct_type;
+    ast->struct_decl.constructor_type = type_table_make_constructor_type(type_checker->type_table, struct_type);
 }
 
 static void check_top_level_decl(struct type_checker* type_checker, struct ast* ast) {

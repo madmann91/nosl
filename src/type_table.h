@@ -29,3 +29,7 @@ void type_table_finalize_struct_type(struct type_table*, struct type*);
     struct type_table*,
     const struct type* const* elem_types,
     size_t elem_count);
+
+[[nodiscard]] const struct type* type_table_make_constructor_type(
+    struct type_table* type_checker,
+    const struct type* struct_type);

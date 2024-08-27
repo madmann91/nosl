@@ -171,6 +171,7 @@ struct ast {
         struct {
             const char* name;
             struct ast* fields;
+            const struct type* constructor_type;
         } struct_decl;
         struct {
             struct ast* ret_type;

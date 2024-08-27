@@ -266,3 +266,22 @@ const struct type* type_table_make_compound_type(
         }
     });
 }
+
+const struct type* type_table_make_constructor_type(
+    struct type_table* type_table,
+    const struct type* struct_type)
+{
+    assert(struct_type->tag == TYPE_STRUCT);
+    struct small_func_param_vec func_params;
+    small_func_param_vec_init(&func_params);
+    for (size_t i = 0; i < struct_type->struct_type.field_count; ++i) {
+        small_func_param_vec_push(&func_params, &(struct func_param) {
+            .type = struct_type->struct_type.fields[i].type,
+            .is_output = false
+        });
+    }
+    const struct type* constructor_type = type_table_make_func_type(type_table,
+        struct_type, func_params.elems, func_params.elem_count, false);
+    small_func_param_vec_destroy(&func_params);
+    return constructor_type;
+}
