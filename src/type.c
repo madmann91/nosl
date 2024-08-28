@@ -17,6 +17,28 @@ struct styles {
 SMALL_VEC_IMPL(small_type_vec, const struct type*, PUBLIC)
 SMALL_VEC_IMPL(small_func_param_vec, struct func_param, PUBLIC)
 
+const char* prim_type_tag_to_string(enum prim_type_tag tag) {
+    switch (tag) {
+#define x(name, str, ...) case PRIM_TYPE_##name: return str;
+        PRIM_TYPE_LIST(x)
+#undef x
+        default:
+            assert(false && "invalid prim type");
+            return "";
+    }
+}
+
+const char* shader_type_tag_to_string(enum shader_type_tag tag) {
+    switch (tag) {
+#define x(name, str, ...) case SHADER_TYPE_##name: return str;
+        SHADER_TYPE_LIST(x)
+#undef x
+        default:
+            assert(false && "invalid shader type");
+            return "";
+    }
+}
+
 enum coercion_rank type_coercion_rank(const struct type* from, const struct type* to) {
     if (from == to)
         return COERCION_EXACT;

@@ -33,28 +33,6 @@ int binary_expr_tag_precedence(enum binary_expr_tag tag) {
     }
 }
 
-const char* prim_type_tag_to_string(enum prim_type_tag tag) {
-    switch (tag) {
-#define x(name, str, ...) case PRIM_TYPE_##name: return str;
-        PRIM_TYPE_LIST(x)
-#undef x
-        default:
-            assert(false && "invalid prim type");
-            return "";
-    }
-}
-
-const char* shader_type_tag_to_string(enum shader_type_tag tag) {
-    switch (tag) {
-#define x(name, str, ...) case SHADER_TYPE_##name: return str;
-        SHADER_TYPE_LIST(x)
-#undef x
-        default:
-            assert(false && "invalid shader type");
-            return "";
-    }
-}
-
 const char* binary_expr_tag_to_string(enum binary_expr_tag tag) {
     switch (tag) {
 #define x(name, tok, str, ...) case BINARY_EXPR_##name: return str;
@@ -116,6 +94,17 @@ const char* unary_expr_tag_to_func_name(enum unary_expr_tag tag) {
     }
 }
 
+const char* builtin_tag_to_string(enum builtin_tag tag) {
+    switch (tag) {
+#define x(name, str) case BUILTIN_##name: return str;
+        BUILTIN_LIST(x)
+#undef x
+        default:
+            assert(false && "invalid builtin");
+            return "";
+    }
+}
+
 enum binary_expr_tag binary_expr_tag_remove_assign(enum binary_expr_tag tag) {
     switch (tag) {
         case BINARY_EXPR_ASSIGN_MUL:     return BINARY_EXPR_MUL;
@@ -156,18 +145,6 @@ bool unary_expr_tag_is_inc_or_dec(enum unary_expr_tag tag) {
             return true;
         default:
             return false;
-    }
-}
-
-enum prim_type_tag ast_literal_tag_to_prim_type_tag(enum ast_tag tag) {
-    switch (tag) {
-        case AST_INT_LITERAL:    return PRIM_TYPE_INT;
-        case AST_FLOAT_LITERAL:  return PRIM_TYPE_FLOAT;
-        case AST_BOOL_LITERAL:   return PRIM_TYPE_BOOL;
-        case AST_STRING_LITERAL: return PRIM_TYPE_STRING;
-        default:
-            assert(false && "invalid AST literal");
-            return PRIM_TYPE_VOID;
     }
 }
 
@@ -260,7 +237,7 @@ static void print(
             fprintf(file, "%s<error>%s", styles->error, styles->reset);
             break;
         case AST_BUILTIN:
-            fprintf(file, "%s<builtin %s>%s", styles->error, ast->builtin.name, styles->reset);
+            fprintf(file, "%s<builtin %s>%s", styles->error, builtin_tag_to_string(ast->builtin.tag), styles->reset);
             break;
         case AST_METADATUM:
             print(file, indent, ast->metadatum.type, styles);

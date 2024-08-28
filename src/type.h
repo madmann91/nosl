@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ast.h"
+#include "token.h"
 
 #include <stddef.h>
 
@@ -15,6 +15,19 @@ enum type_tag {
     TYPE_FUNC,
     TYPE_COMPOUND,
     TYPE_STRUCT
+};
+
+enum prim_type_tag {
+#define x(name, ...) PRIM_TYPE_##name,
+    PRIM_TYPE_LIST(x)
+#undef x
+    PRIM_TYPE_COUNT
+};
+
+enum shader_type_tag {
+#define x(name, ...) SHADER_TYPE_##name,
+    SHADER_TYPE_LIST(x)
+#undef x
 };
 
 struct func_param {
@@ -86,6 +99,9 @@ enum coercion_rank {
 
 SMALL_VEC_DECL(small_type_vec, const struct type*, PUBLIC)
 SMALL_VEC_DECL(small_func_param_vec, struct func_param, PUBLIC)
+
+[[nodiscard]] const char* prim_type_tag_to_string(enum prim_type_tag);
+[[nodiscard]] const char* shader_type_tag_to_string(enum shader_type_tag);
 
 [[nodiscard]] enum coercion_rank type_coercion_rank(const struct type*, const struct type*);
 [[nodiscard]] bool type_coercion_is_lossy(const struct type*, const struct type*);

@@ -1,6 +1,7 @@
 #pragma once
 
-#include "token.h"
+#include "type.h"
+#include "builtins.h"
 
 #include <overture/log.h>
 #include <overture/vec.h>
@@ -78,19 +79,6 @@ enum binary_expr_tag {
 #undef x
 };
 
-enum prim_type_tag {
-#define x(name, ...) PRIM_TYPE_##name,
-    PRIM_TYPE_LIST(x)
-#undef x
-    PRIM_TYPE_COUNT
-};
-
-enum shader_type_tag {
-#define x(name, ...) SHADER_TYPE_##name,
-    SHADER_TYPE_LIST(x)
-#undef x
-};
-
 enum ast_tag {
     AST_ERROR,
     AST_METADATUM,
@@ -155,7 +143,7 @@ struct ast {
         float_literal float_literal;
         const char* string_literal;
         struct {
-            const char* name;
+            enum builtin_tag tag;
         } builtin;
         struct {
             bool is_closure;
@@ -291,8 +279,6 @@ SMALL_VEC_DECL(small_ast_vec, struct ast*, PUBLIC)
 
 [[nodiscard]] bool unary_expr_tag_is_postfix(enum unary_expr_tag);
 [[nodiscard]] int binary_expr_tag_precedence(enum binary_expr_tag);
-[[nodiscard]] const char* prim_type_tag_to_string(enum prim_type_tag);
-[[nodiscard]] const char* shader_type_tag_to_string(enum shader_type_tag);
 [[nodiscard]] const char* binary_expr_tag_to_string(enum binary_expr_tag);
 [[nodiscard]] const char* unary_expr_tag_to_string(enum unary_expr_tag);
 [[nodiscard]] const char* binary_expr_tag_to_func_name(enum binary_expr_tag);
@@ -301,7 +287,6 @@ SMALL_VEC_DECL(small_ast_vec, struct ast*, PUBLIC)
 [[nodiscard]] bool binary_expr_tag_is_assign(enum binary_expr_tag);
 [[nodiscard]] bool binary_expr_tag_is_logic(enum binary_expr_tag);
 [[nodiscard]] bool unary_expr_tag_is_inc_or_dec(enum unary_expr_tag);
-[[nodiscard]] enum prim_type_tag ast_literal_tag_to_prim_type_tag(enum ast_tag);
 
 void ast_print(FILE*, const struct ast*, const struct ast_print_options*);
 void ast_dump(const struct ast*);

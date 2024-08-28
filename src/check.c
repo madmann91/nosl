@@ -549,7 +549,12 @@ static const struct type* check_assign_expr(
     return coerce_expr(type_checker, ast, expected_type);
 }
 
-static inline bool is_viable_candidate(const struct type* candidate_type, const struct ast* args, size_t arg_count) {
+static inline bool is_viable_candidate(
+    const struct type* candidate_type,
+    const struct type* ret_type,
+    const struct ast* args,
+    size_t arg_count)
+{
     assert(candidate_type->tag == TYPE_FUNC);
     if (candidate_type->func_type.param_count > arg_count ||
         (candidate_type->func_type.param_count < arg_count && !candidate_type->func_type.has_ellipsis))
@@ -561,17 +566,20 @@ static inline bool is_viable_candidate(const struct type* candidate_type, const 
         if (!type_is_coercible_to(arg->type, candidate_type->func_type.params[i].type))
             return false;
     }
+    if (ret_type && !type_is_coercible_to(candidate_type->func_type.ret_type, ret_type))
+        return false;
     return true;
 }
 
 static inline size_t remove_non_viable_candidates(
     struct ast** candidates,
     size_t candidate_count,
+    const struct type* ret_type,
     const struct ast* args)
 {
     size_t j = 0, arg_count = ast_list_size(args);
     for (size_t i = 0; i < candidate_count; ++i) {
-        if (is_viable_candidate(candidates[i]->type, args, arg_count))
+        if (is_viable_candidate(candidates[i]->type, ret_type, args, arg_count))
             candidates[j++] = candidates[i];
     }
     return j;
@@ -596,7 +604,7 @@ static bool is_better_candidate(
             other_rank = type_coercion_rank(arg->type, other->type->func_type.params[arg_index].type);
         if (candidate_rank < other_rank)
             return false;
-        is_better |= candidate_rank >= other_rank;
+        is_better |= candidate_rank > other_rank;
     }
     if (is_better)
         return true;
@@ -642,7 +650,7 @@ static struct ast* find_func_from_candidates(
         return NULL;
     }
 
-    size_t viable_count = remove_non_viable_candidates(candidates, candidate_count, args);
+    size_t viable_count = remove_non_viable_candidates(candidates, candidate_count, ret_type, args);
     if (viable_count == 0) {
         report_overload_error(
             type_checker, loc, "no viable candidate for", func_name, candidates, candidate_count, ret_type, args);
@@ -852,8 +860,11 @@ static const struct type* check_construct_expr(
     if (!check_call_args(type_checker, ast->construct_expr.args))
         return type_table_make_error_type(type_checker->type_table);
 
-    struct small_ast_vec candidates = builtins_list_constructors(type_checker->builtins, type->prim_type);
-    small_ast_vec_relocate(&candidates);
+    struct small_ast_vec candidates;
+    small_ast_vec_init(&candidates);
+    struct ast* constructors = builtins_constructors(type_checker->builtins, type->prim_type);
+    for (struct ast* constructor = constructors; constructor; constructor = constructor->next)
+        small_ast_vec_push(&candidates, &constructor);
     struct ast* symbol = find_func_from_candidates(type_checker, &ast->loc,
         prim_type_tag_to_string(type->prim_type), candidates.elems, candidates.elem_count, type, ast->construct_expr.args);
     small_ast_vec_destroy(&candidates);
@@ -975,6 +986,20 @@ static const struct type* check_cast_expr(
     return coerce_expr(type_checker, ast, expected_type);
 }
 
+static inline const struct type* check_literal(struct type_checker* type_checker, struct ast* ast) {
+    enum prim_type_tag tag = PRIM_TYPE_VOID;
+    switch (ast->tag) {
+        case AST_INT_LITERAL:    tag = PRIM_TYPE_INT;    break;
+        case AST_FLOAT_LITERAL:  tag = PRIM_TYPE_FLOAT;  break;
+        case AST_BOOL_LITERAL:   tag = PRIM_TYPE_BOOL;   break;
+        case AST_STRING_LITERAL: tag = PRIM_TYPE_STRING; break;
+        default:
+            assert(false && "invalid AST literal");
+            break;
+    }
+    return ast->type = type_table_make_prim_type(type_checker->type_table, tag);
+}
+
 static const struct type* check_expr(
     struct type_checker* type_checker,
     struct ast* ast,
@@ -984,11 +1009,10 @@ static const struct type* check_expr(
         case AST_BOOL_LITERAL:
         case AST_INT_LITERAL:
         case AST_FLOAT_LITERAL:
-        case AST_STRING_LITERAL: {
-            ast->type = type_table_make_prim_type(type_checker->type_table,
-                ast_literal_tag_to_prim_type_tag(ast->tag));
+        case AST_STRING_LITERAL:
+            check_literal(type_checker, ast);
             return coerce_expr(type_checker, ast, expected_type);
-        }
+
         case AST_IDENT_EXPR:     return check_ident_expr(type_checker, ast, expected_type);
         case AST_BINARY_EXPR:    return check_binary_expr(type_checker, ast, expected_type);
         case AST_UNARY_EXPR:     return check_unary_expr(type_checker, ast, expected_type);
