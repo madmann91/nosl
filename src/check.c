@@ -352,9 +352,7 @@ static inline struct ast* find_conflicting_overload(
     struct small_ast_vec symbols = env_find_all_symbols(type_checker->env, name);
     small_ast_vec_relocate(&symbols);
     VEC_FOREACH(struct ast*, symbol_ptr, symbols) {
-        if ((*symbol_ptr)->type->tag == TYPE_FUNC &&
-            type_has_same_param_and_ret_types((*symbol_ptr)->type, type))
-        {
+        if ((*symbol_ptr)->type->tag == TYPE_FUNC && (*symbol_ptr)->type == type) {
             conflicting_overload = *symbol_ptr;
             break;
         }
@@ -591,8 +589,8 @@ static bool is_better_candidate(
     const struct type* ret_type,
     const struct ast* args)
 {
-    assert(is_viable_candidate(candidate->type, args, ast_list_size(args)));
-    assert(is_viable_candidate(other->type, args, ast_list_size(args)));
+    assert(is_viable_candidate(candidate->type, ret_type, args, ast_list_size(args)));
+    assert(is_viable_candidate(other->type, ret_type, args, ast_list_size(args)));
     bool is_better = false;
     size_t arg_index = 0;
     for (const struct ast* arg = args; arg; arg = arg->next, arg_index++) {
@@ -762,9 +760,12 @@ static const struct type* check_call_expr(
         return ast->type = type_table_make_error_type(type_checker->type_table);
     }
 
-    assert(ast_list_size(ast->call_expr.args) == callee_type->func_type.param_count);
+    assert(
+        ast_list_size(ast->call_expr.args) == callee_type->func_type.param_count ||
+        (callee_type->func_type.has_ellipsis && ast_list_size(ast->call_expr.args) > callee_type->func_type.param_count));
+
     size_t arg_index = 0;
-    for (struct ast* arg = ast->call_expr.args; arg; arg = arg->next)
+    for (struct ast* arg = ast->call_expr.args; arg_index < callee_type->func_type.param_count; arg = arg->next)
         coerce_expr(type_checker, arg, callee_type->func_type.params[arg_index++].type);
     ast->type = callee_type->func_type.ret_type;
     return coerce_expr(type_checker, ast, expected_type);

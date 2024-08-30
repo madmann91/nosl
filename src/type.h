@@ -100,6 +100,8 @@ enum coercion_rank {
 SMALL_VEC_DECL(small_type_vec, const struct type*, PUBLIC)
 SMALL_VEC_DECL(small_func_param_vec, struct func_param, PUBLIC)
 
+[[nodiscard]] bool prim_type_tag_is_triple(enum prim_type_tag);
+[[nodiscard]] size_t prim_type_tag_component_count(enum prim_type_tag);
 [[nodiscard]] const char* prim_type_tag_to_string(enum prim_type_tag);
 [[nodiscard]] const char* shader_type_tag_to_string(enum shader_type_tag);
 
@@ -114,7 +116,6 @@ SMALL_VEC_DECL(small_func_param_vec, struct func_param, PUBLIC)
 [[nodiscard]] bool type_is_point_like(const struct type*);
 [[nodiscard]] bool type_is_coercible_to(const struct type*, const struct type*);
 [[nodiscard]] bool type_is_castable_to(const struct type*, const struct type*);
-[[nodiscard]] bool type_has_same_param_and_ret_types(const struct type*, const struct type*);
 [[nodiscard]] size_t type_component_count(const struct type*);
 [[nodiscard]] const char* type_constructor_name(const struct type*);
 

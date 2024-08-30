@@ -173,16 +173,9 @@ struct type* type_table_create_struct_type(struct type_table* type_table, size_t
     return type;
 } 
 
-[[maybe_unused]] static inline bool is_registered_type(
-    const struct type_table* type_table,
-    const struct type* type)
-{
-    return type_set_find(&type_table->types, &type) != NULL;
-}
-
 void type_table_finalize_struct_type(struct type_table* type_table, struct type* type) {
     assert(type->tag == TYPE_STRUCT);
-    assert(is_registered_type(type_table, type));
+    assert(type_set_find(&type_table->types, (const struct type* const*)&type) != NULL);
     for (size_t i = 0; i < type->struct_type.field_count; ++i)
         type->struct_type.fields[i].name = str_pool_insert(type_table->str_pool, type->struct_type.fields[i].name);
     type->struct_type.name = str_pool_insert(type_table->str_pool, type->struct_type.name);

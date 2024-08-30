@@ -17,6 +17,24 @@ struct styles {
 SMALL_VEC_IMPL(small_type_vec, const struct type*, PUBLIC)
 SMALL_VEC_IMPL(small_func_param_vec, struct func_param, PUBLIC)
 
+bool prim_type_tag_is_triple(enum prim_type_tag tag) {
+    return
+        tag == PRIM_TYPE_COLOR ||
+        tag == PRIM_TYPE_POINT ||
+        tag == PRIM_TYPE_VECTOR ||
+        tag == PRIM_TYPE_NORMAL;
+}
+
+size_t prim_type_tag_component_count(enum prim_type_tag tag) {
+    switch (tag) {
+#define x(name, str, type, comp) case PRIM_TYPE_##name: return comp;
+        PRIM_TYPE_LIST(x)
+#undef x
+        default:
+            return 1;
+    }
+}
+
 const char* prim_type_tag_to_string(enum prim_type_tag tag) {
     switch (tag) {
 #define x(name, str, ...) case PRIM_TYPE_##name: return str;
@@ -39,14 +57,8 @@ const char* shader_type_tag_to_string(enum shader_type_tag tag) {
     }
 }
 
-enum coercion_rank type_coercion_rank(const struct type* from, const struct type* to) {
-    if (from == to)
-        return COERCION_EXACT;
-
-    if (type_is_prim_type(to, PRIM_TYPE_BOOL) && from->tag == TYPE_CLOSURE)
-        return COERCION_TO_BOOL;
-
-    if (from->tag == TYPE_PRIM && to->tag == TYPE_PRIM) {
+static enum coercion_rank type_coercion_rank_prim(const struct type* from, enum prim_type_tag to_tag) {
+    if (from->tag == TYPE_PRIM) {
         static const enum coercion_rank rank_matrix[PRIM_TYPE_COUNT][PRIM_TYPE_COUNT] = {
             [PRIM_TYPE_BOOL  ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
             [PRIM_TYPE_INT   ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
@@ -87,8 +99,34 @@ enum coercion_rank type_coercion_rank(const struct type* from, const struct type
             [PRIM_TYPE_BOOL  ][PRIM_TYPE_FLOAT ] = COERCION_TO_FLOAT,
             [PRIM_TYPE_BOOL  ][PRIM_TYPE_INT   ] = COERCION_TO_INT
         };
-        return rank_matrix[from->prim_type][to->prim_type];
+        return rank_matrix[from->prim_type][to_tag];
     }
+
+    if (from->tag == TYPE_CLOSURE && to_tag == PRIM_TYPE_BOOL)
+        return COERCION_TO_BOOL;
+
+    if (from->tag == TYPE_COMPOUND) {
+        if (!prim_type_tag_is_triple(to_tag) && to_tag != PRIM_TYPE_MATRIX)
+            return COERCION_IMPOSSIBLE;
+        if (prim_type_tag_component_count(to_tag) != from->compound_type.elem_count)
+            return COERCION_IMPOSSIBLE;
+        enum coercion_rank min_rank = COERCION_EXACT;
+        for (size_t i = 0; i < from->compound_type.elem_count; ++i) {
+            enum coercion_rank rank = type_coercion_rank_prim(from->compound_type.elem_types[i], PRIM_TYPE_FLOAT);
+            min_rank = min_rank < rank ? min_rank : rank;
+        }
+        return min_rank;
+    }
+
+    return COERCION_IMPOSSIBLE;
+}
+
+enum coercion_rank type_coercion_rank(const struct type* from, const struct type* to) {
+    if (from == to)
+        return COERCION_EXACT;
+
+    if (to->tag == TYPE_PRIM)
+        return type_coercion_rank_prim(from, to->prim_type);
 
     if (from->tag == TYPE_ARRAY && to->tag == TYPE_ARRAY &&
         from->array_type.elem_type == to->array_type.elem_type &&
@@ -154,11 +192,7 @@ bool type_is_void(const struct type* type) {
 }
 
 bool type_is_triple(const struct type* type) {
-    return
-        type->prim_type == PRIM_TYPE_COLOR ||
-        type->prim_type == PRIM_TYPE_POINT ||
-        type->prim_type == PRIM_TYPE_VECTOR ||
-        type->prim_type == PRIM_TYPE_NORMAL;
+    return type->tag == TYPE_PRIM && prim_type_tag_is_triple(type->prim_type);
 }
 
 bool type_is_point_like(const struct type* type) {
@@ -186,30 +220,8 @@ bool type_is_castable_to(const struct type* from, const struct type* to) {
     return false;
 }
 
-bool type_has_same_param_and_ret_types(const struct type* type, const struct type* other) {
-    assert(type->tag == TYPE_FUNC);
-    assert(other->tag == TYPE_FUNC);
-    if (type->func_type.param_count != other->func_type.param_count ||
-        type->func_type.ret_type != other->func_type.ret_type)
-        return false;
-    for (size_t i = 0, param_count = type->func_type.param_count; i < param_count; ++i) {
-        if (type->func_type.params[i].type != other->func_type.params[i].type ||
-            type->func_type.params[i].is_output != other->func_type.params[i].is_output)
-            return false;
-    }
-    return true;
-}
-
 size_t type_component_count(const struct type* type) {
-    if (type->tag != TYPE_PRIM)
-        return 1;
-    switch (type->prim_type) {
-#define x(name, str, type, comp) case PRIM_TYPE_##name: return comp;
-        PRIM_TYPE_LIST(x)
-#undef x
-        default:
-            return 1;
-    }
+    return type->tag == TYPE_PRIM ? prim_type_tag_component_count(type->prim_type) : 1;
 }
 
 const char* type_constructor_name(const struct type* type) {
@@ -253,9 +265,11 @@ static void print(FILE* file, const struct type* type, const struct styles* styl
                 if (type->func_type.params[i].is_output)
                     fprintf(file, "%soutput%s ", styles->keyword, styles->reset);
                 print(file, type->func_type.params[i].type, styles);
-                if (i != type->func_type.param_count - 1)
+                if (i != type->func_type.param_count - 1 || type->func_type.has_ellipsis)
                     fputs(", ", file);
             }
+            if (type->func_type.has_ellipsis)
+                fputs("...", file);
             fputs(")", file);
             break;
         case TYPE_COMPOUND:

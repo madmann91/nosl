@@ -103,6 +103,99 @@
     x(DETERMINANT, "determinant") \
     x(TRANSPOSE,   "transpose")
 
+#define BUILTIN_PATTERN_GEN_FUNCTIONS(x) \
+    x(STEP,              "step") \
+    x(LINEARSTEP,        "linearstep") \
+    x(SMOOTHSTEP,        "smoothstep") \
+    x(SMOOTH_LINEARSTEP, "smooth_linearstep") \
+    x(NOISE,             "noise") \
+    x(PNOISE,            "pnoise") \
+    x(SNOISE,            "snoise") \
+    x(PSNOISE,           "psnoise") \
+    x(CELLNOISE,         "cellnoise") \
+    x(HASHNOISE,         "hashnoise") \
+    x(HASH,              "hash") \
+    x(SPLINE,            "spline") \
+    x(SPLINEINVERSE,     "splineinverse")
+
+#define BUILTIN_DERIV_FUNCTIONS(x) \
+    x(DX,              "Dx") \
+    x(DY,              "Dy") \
+    x(DZ,              "Dz") \
+    x(FILTERWIDTH,     "filterwidth") \
+    x(AREA,            "area") \
+    x(CALCULATENORMAL, "calculatenormal") \
+    x(AASTEP,          "aastep")
+
+#define BUILTIN_DISPLACE_FUNCTIONS(x) \
+    x(DISPLACE, "displace") \
+    x(BUMP,     "bump")
+
+#define BUILTIN_STRING_FUNCTIONS(x) \
+    x(PRINTF,       "printf") \
+    x(FORMAT,       "format") \
+    x(ERROR,        "error") \
+    x(WARNING,      "warning") \
+    x(FPRINTF,      "fprintf") \
+    x(CONCAT,       "concat") \
+    x(STRLEN,       "strlen") \
+    x(STARTSWITH,   "startswith") \
+    x(ENDSWITH,     "endswith") \
+    x(STOI,         "stoi") \
+    x(STOF,         "stof") \
+    x(SPLIT,        "split") \
+    x(SUBSTR,       "substr") \
+    x(GETCHAR,      "getchar") \
+    x(REGEX_SEARCH, "regex_search") \
+    x(REGEX_MATCH,  "regex_match")
+
+#define BUILTIN_TEXTURE_FUNCTIONS(x) \
+    x(TEXTURE,           "texture") \
+    x(TEXTURE3D,         "texture3d") \
+    x(ENVIRONMENT,       "environment") \
+    x(GETTEXTUREINFO,    "gettextureinfo") \
+    x(POINTCLOUD_SEARCH, "pointcloud_search") \
+    x(POINTCLOUD_GET,    "pointcloud_get") \
+    x(POINTCLOUD_WRITE,  "pointcloud_write")
+
+#define BUILTIN_CLOSURE_FUNCTIONS(x) \
+    x(OREN_NAYAR_DIFFUSE_BSDF,  "oren_nayar_diffuse_bsdf") \
+    x(BURLEY_DIFFUSE_BSDF,      "burley_diffuse_bsdf") \
+    x(DIELECTRIC_BSDF,          "dielectric_bsdf") \
+    x(CONDUCTOR_BSDF,           "conductor_bsdf") \
+    x(GENERALIZED_SCHLICK_BSDF, "generalized_schlick_bsdf") \
+    x(TRANSLUCENT_BSDF,         "translucent_bsdf") \
+    x(TRANSPARENT_BSDF,         "transparent_bsdf") \
+    x(SUBSURFACE_BSDF,          "subsurface_bsdf") \
+    x(SHEEN_BSDF,               "sheen_bsdf") \
+    x(ANISOTROPIC_VDF,          "anisotropic_vdf") \
+    x(MEDIUM_VDF,               "medium_vdf") \
+    x(UNIFORM_EDF,              "uniform_edf") \
+    x(LAYER,                    "layer") \
+    x(HOLDOUT,                  "holdout") \
+    x(DEBUG,                    "debug") \
+    x(ARTISTIC_IOR,             "artistic_ior")
+
+#define BUILTIN_STATE_FUNCTIONS(x) \
+    x(GETATTRIBUTE, "getattribute") \
+    x(SETMESSAGE,   "setmessage") \
+    x(GETMESSAGE,   "getmessage") \
+    x(SURFACEAREA,  "surfacearea") \
+    x(RAYTYPE,      "raytype") \
+    x(BACKFACING,   "backfacing") \
+    x(ISCONNECTED,  "isconnected") \
+    x(ISCONSTANT,   "isconstant")
+
+#define BUILTIN_DICT_FUNCTIONS(x) \
+    x(DICT_FIND,  "dict_find") \
+    x(DICT_NEXT,  "dict_next") \
+    x(DICT_VALUE, "dict_value")
+
+#define BUILTIN_OTHER_FUNCTIONS(x) \
+    x(TRACE,       "trace") \
+    x(ARRAYLENGTH, "arraylength") \
+    x(EXIT,        "exit")
+
 #define BUILTIN_OPERATORS(x) \
     x(OPERATOR_ADD,      "__operator__add__") \
     x(OPERATOR_SUB,      "__operator__sub__") \
@@ -136,21 +229,6 @@
     x(NORMAL, "normal") \
     x(MATRIX, "matrix")
 
-#define BUILTIN_PATTERN_GEN_FUNCTIONS(x) \
-    x(STEP,              "step") \
-    x(LINEARSTEP,        "linearstep") \
-    x(SMOOTHSTEP,        "smoothstep") \
-    x(SMOOTH_LINEARSTEP, "smooth_linearstep") \
-    x(NOISE,             "noise") \
-    x(PNOISE,            "pnoise") \
-    x(SNOISE,            "snoise") \
-    x(PSNOISE,           "psnoise") \
-    x(CELLNOISE,         "cellnoise") \
-    x(HASHNOISE,         "hashnoise") \
-    x(HASH,              "hash") \
-    x(SPLINE,            "spline") \
-    x(SPLINEINVERSE,     "splineinverse")
-
 #define BUILTIN_LIST(x) \
     BUILTIN_CONSTANTS(x) \
     BUILTIN_GLOBALS(x) \
@@ -159,6 +237,11 @@
     BUILTIN_COLOR_FUNCTIONS(x) \
     BUILTIN_MATRIX_FUNCTIONS(x) \
     BUILTIN_PATTERN_GEN_FUNCTIONS(x) \
+    BUILTIN_DERIV_FUNCTIONS(x) \
+    BUILTIN_DISPLACE_FUNCTIONS(x) \
+    BUILTIN_STRING_FUNCTIONS(x) \
+    BUILTIN_TEXTURE_FUNCTIONS(x) \
+    BUILTIN_CLOSURE_FUNCTIONS(x) \
     BUILTIN_OPERATORS(x) \
     BUILTIN_CONSTRUCTORS(x)
 

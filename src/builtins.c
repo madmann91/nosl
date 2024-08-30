@@ -16,6 +16,10 @@ struct builtins {
     struct ast* color_functions;
     struct ast* matrix_functions;
     struct ast* pattern_gen_functions;
+    struct ast* deriv_functions;
+    struct ast* displace_functions;
+    struct ast* string_functions;
+    struct ast* texture_functions;
     struct ast* constants;
     struct ast* operators;
     struct mem_pool mem_pool;
@@ -176,6 +180,159 @@ static inline struct ast* make_fresnel_function(struct builtins* builtins) {
             { PRIM_TYPE_VECTOR, true },
             { PRIM_TYPE_VECTOR, true },
         });
+}
+
+static inline struct ast* make_spline_function(struct builtins* builtins, enum prim_type_tag tag, bool has_size) {
+    const struct type* ret_type   = type_table_make_prim_type(builtins->type_table, tag);
+    const struct type* array_type = type_table_make_unsized_array_type(builtins->type_table, ret_type);
+    return alloc_builtin(builtins, BUILTIN_SPLINE, type_table_make_func_type(builtins->type_table,
+        ret_type,
+        (struct func_param[]) {
+            { type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING), false },
+            { type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT), false },
+            { has_size ? type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT) : array_type, false },
+            { array_type, false },
+        }, has_size ? 4 : 3, false));
+}
+
+static inline struct ast* make_split_function(struct builtins* builtins, size_t param_count) {
+    assert(param_count == 2 || param_count == 3 || param_count == 4);
+    const struct type* int_type          = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT);
+    const struct type* string_type       = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
+    const struct type* string_array_type = type_table_make_unsized_array_type(builtins->type_table, string_type);
+    const struct func_param func_params[] = {
+        { string_type, false },
+        { string_array_type, true },
+        { string_type, false },
+        { int_type, false }
+    };
+    return alloc_builtin(builtins, BUILTIN_SPLIT,
+        type_table_make_func_type(builtins->type_table, int_type, func_params, param_count, false));
+}
+
+static inline struct ast* make_regex_function(struct builtins* builtins, enum builtin_tag tag) {
+    const struct type* int_type       = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT);
+    const struct type* string_type    = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
+    const struct type* int_array_type = type_table_make_unsized_array_type(builtins->type_table, int_type);
+    const struct func_param func_params[] = {
+        { string_type, false },
+        { int_array_type, false },
+        { string_type, false }
+    };
+    return alloc_builtin(builtins, tag,
+        type_table_make_func_type(builtins->type_table, int_type, func_params, 3, false));
+}
+
+static inline struct ast* make_texture_function(struct builtins* builtins, bool takes_dxdy, enum prim_type_tag ret_tag) {
+    const struct type* ret_type    = type_table_make_prim_type(builtins->type_table, ret_tag);
+    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
+    const struct type* float_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT);
+    const struct func_param func_params[] = {
+        { string_type, false },
+        { float_type, false },
+        { float_type, false },
+        { float_type, false },
+        { float_type, false },
+        { float_type, false },
+        { float_type, false }
+    };
+    return alloc_builtin(builtins, BUILTIN_TEXTURE,
+        type_table_make_func_type(builtins->type_table, ret_type, func_params, takes_dxdy ? 7 : 3, true));
+}
+
+static inline struct ast* make_texture3d_function(struct builtins* builtins, bool takes_dxdy, enum prim_type_tag ret_tag) {
+    const struct type* ret_type    = type_table_make_prim_type(builtins->type_table, ret_tag);
+    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
+    const struct type* point_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_POINT);
+    const struct type* vector_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_VECTOR);
+    const struct func_param func_params[] = {
+        { string_type, false },
+        { point_type, false },
+        { vector_type, false },
+        { vector_type, false },
+        { vector_type, false }
+    };
+    return alloc_builtin(builtins, BUILTIN_TEXTURE3D,
+        type_table_make_func_type(builtins->type_table, ret_type, func_params, takes_dxdy ? 5 : 2, true));
+}
+
+static inline struct ast* make_environment_function(struct builtins* builtins, bool takes_dxdy, enum prim_type_tag ret_tag) {
+    const struct type* ret_type    = type_table_make_prim_type(builtins->type_table, ret_tag);
+    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
+    const struct type* vector_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_VECTOR);
+    const struct func_param func_params[] = {
+        { string_type, false },
+        { vector_type, false },
+        { vector_type, false },
+        { vector_type, false }
+    };
+    return alloc_builtin(builtins, BUILTIN_ENVIRONMENT,
+        type_table_make_func_type(builtins->type_table, ret_type, func_params, takes_dxdy ? 4 : 2, true));
+}
+
+static inline struct ast* make_gettextureinfo_function(struct builtins* builtins, bool takes_coords, const struct type* output_type) {
+    const struct type* int_type    = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT);
+    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
+    const struct type* float_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT);
+    const struct func_param params_without_coords[] = {
+        { string_type, false },
+        { string_type, false },
+        { output_type, true  },
+    };
+    const struct func_param params_with_coords[] = {
+        { string_type, false },
+        { float_type, false },
+        { float_type, false },
+        { string_type, false },
+        { output_type, true  },
+    };
+    const struct func_param* func_params = takes_coords ? params_with_coords : params_without_coords;
+    return alloc_builtin(builtins, BUILTIN_GETTEXTUREINFO,
+        type_table_make_func_type(builtins->type_table, int_type, func_params, takes_coords ? 5 : 3, false));
+}
+
+static inline struct ast* make_pointcloud_search_function(struct builtins* builtins, bool takes_sort) {
+    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
+    const struct type* point_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_POINT);
+    const struct type* float_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT);
+    const struct type* int_type    = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT);
+    const struct func_param func_params[] = {
+        { string_type, false },
+        { point_type, false },
+        { float_type, false },
+        { int_type, false },
+        { int_type, false },
+    };
+    return alloc_builtin(builtins, BUILTIN_POINTCLOUD_SEARCH,
+        type_table_make_func_type(builtins->type_table, int_type, func_params, takes_sort ? 5 : 4, true));
+}
+
+static inline struct ast* make_pointcloud_get_function(struct builtins* builtins, enum prim_type_tag output_tag) {
+    const struct type* string_type    = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
+    const struct type* output_type    = type_table_make_prim_type(builtins->type_table, output_tag);
+    const struct type* int_type       = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT);
+    const struct type* int_array_type = type_table_make_unsized_array_type(builtins->type_table, int_type);
+    const struct func_param func_params[] = {
+        { string_type, false },
+        { int_array_type, false },
+        { int_type, false },
+        { string_type, false },
+        { output_type, true }
+    };
+    return alloc_builtin(builtins, BUILTIN_POINTCLOUD_SEARCH,
+        type_table_make_func_type(builtins->type_table, int_type, func_params, 5, false));
+}
+
+static inline struct ast* make_pointcloud_write_function(struct builtins* builtins) {
+    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
+    const struct type* point_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_POINT);
+    const struct type* int_type    = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT);
+    const struct func_param func_params[] = {
+        { string_type, false },
+        { point_type, false }
+    };
+    return alloc_builtin(builtins, BUILTIN_POINTCLOUD_SEARCH,
+        type_table_make_func_type(builtins->type_table, int_type, func_params, 2, true));
 }
 
 static void register_constants(struct builtins* builtins) {
@@ -405,7 +562,192 @@ static void register_pattern_gen_functions(struct builtins* builtins) {
                 { PRIM_TYPE_POINT, false },
                 { PRIM_TYPE_FLOAT, false },
             }));
+
+        append_builtin(&builtins->pattern_gen_functions, make_unary_function(builtins, BUILTIN_NOISE, tags[i], PRIM_TYPE_FLOAT));
+        append_builtin(&builtins->pattern_gen_functions, make_unary_function(builtins, BUILTIN_NOISE, tags[i], PRIM_TYPE_POINT));
+        append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_NOISE, tags[i], PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
+        append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_NOISE, tags[i], PRIM_TYPE_POINT, PRIM_TYPE_FLOAT));
+
+        append_builtin(&builtins->pattern_gen_functions, make_unary_function(builtins, BUILTIN_SNOISE, tags[i], PRIM_TYPE_FLOAT));
+        append_builtin(&builtins->pattern_gen_functions, make_unary_function(builtins, BUILTIN_SNOISE, tags[i], PRIM_TYPE_POINT));
+        append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_SNOISE, tags[i], PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
+        append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_SNOISE, tags[i], PRIM_TYPE_POINT, PRIM_TYPE_FLOAT));
+
+        append_builtin(&builtins->pattern_gen_functions, make_unary_function(builtins, BUILTIN_CELLNOISE, tags[i], PRIM_TYPE_FLOAT));
+        append_builtin(&builtins->pattern_gen_functions, make_unary_function(builtins, BUILTIN_CELLNOISE, tags[i], PRIM_TYPE_POINT));
+        append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_CELLNOISE, tags[i], PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
+        append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_CELLNOISE, tags[i], PRIM_TYPE_POINT, PRIM_TYPE_FLOAT));
+
+        append_builtin(&builtins->pattern_gen_functions, make_unary_function(builtins, BUILTIN_HASHNOISE, tags[i], PRIM_TYPE_FLOAT));
+        append_builtin(&builtins->pattern_gen_functions, make_unary_function(builtins, BUILTIN_HASHNOISE, tags[i], PRIM_TYPE_POINT));
+        append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_HASHNOISE, tags[i], PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
+        append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_HASHNOISE, tags[i], PRIM_TYPE_POINT, PRIM_TYPE_FLOAT));
+
+        append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_PNOISE, tags[i], PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
+        append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_PNOISE, tags[i], PRIM_TYPE_POINT, PRIM_TYPE_POINT));
+        append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_PSNOISE, tags[i], PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
+        append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_PSNOISE, tags[i], PRIM_TYPE_POINT, PRIM_TYPE_POINT));
+
+        append_builtin(&builtins->pattern_gen_functions, make_builtin_function(builtins, BUILTIN_PNOISE, false, tags[i], 4,
+            (struct builtin_param[]) {
+                { PRIM_TYPE_FLOAT, false },
+                { PRIM_TYPE_FLOAT, false },
+                { PRIM_TYPE_FLOAT, false },
+                { PRIM_TYPE_FLOAT, false },
+            }));
+        append_builtin(&builtins->pattern_gen_functions, make_builtin_function(builtins, BUILTIN_PNOISE, false, tags[i], 4,
+            (struct builtin_param[]) {
+                { PRIM_TYPE_POINT, false },
+                { PRIM_TYPE_FLOAT, false },
+                { PRIM_TYPE_POINT, false },
+                { PRIM_TYPE_FLOAT, false },
+            }));
+        append_builtin(&builtins->pattern_gen_functions, make_builtin_function(builtins, BUILTIN_PSNOISE, false, tags[i], 4,
+            (struct builtin_param[]) {
+                { PRIM_TYPE_FLOAT, false },
+                { PRIM_TYPE_FLOAT, false },
+                { PRIM_TYPE_FLOAT, false },
+                { PRIM_TYPE_FLOAT, false },
+            }));
+        append_builtin(&builtins->pattern_gen_functions, make_builtin_function(builtins, BUILTIN_PSNOISE, false, tags[i], 4,
+            (struct builtin_param[]) {
+                { PRIM_TYPE_POINT, false },
+                { PRIM_TYPE_FLOAT, false },
+                { PRIM_TYPE_POINT, false },
+                { PRIM_TYPE_FLOAT, false },
+            }));
+
+        append_builtin(&builtins->pattern_gen_functions, make_builtin_function(builtins, BUILTIN_SPLINE, true, tags[i], 3,
+            (struct builtin_param[]) {
+                { PRIM_TYPE_STRING, false },
+                { PRIM_TYPE_FLOAT, false },
+                { tags[i], false },
+            }));
+        append_builtin(&builtins->pattern_gen_functions, make_builtin_function(builtins, BUILTIN_SPLINE, true, tags[i], 3,
+            (struct builtin_param[]) {
+                { PRIM_TYPE_STRING, false },
+                { PRIM_TYPE_FLOAT, false },
+                { tags[i], false },
+            }));
+
+        append_builtin(&builtins->pattern_gen_functions, make_spline_function(builtins, tags[i], false));
+        append_builtin(&builtins->pattern_gen_functions, make_spline_function(builtins, tags[i], true));
     }
+    append_builtin(&builtins->pattern_gen_functions, make_unary_function(builtins, BUILTIN_HASH, PRIM_TYPE_INT, PRIM_TYPE_INT));
+    append_builtin(&builtins->pattern_gen_functions, make_unary_function(builtins, BUILTIN_HASH, PRIM_TYPE_INT, PRIM_TYPE_FLOAT));
+    append_builtin(&builtins->pattern_gen_functions, make_unary_function(builtins, BUILTIN_HASH, PRIM_TYPE_INT, PRIM_TYPE_POINT));
+    append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_HASH, PRIM_TYPE_INT, PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
+    append_builtin(&builtins->pattern_gen_functions, make_binary_function(builtins, BUILTIN_HASH, PRIM_TYPE_INT, PRIM_TYPE_POINT, PRIM_TYPE_FLOAT));
+}
+
+static void register_deriv_functions(struct builtins* builtins) {
+    static const enum prim_type_tag tags[] = {
+        PRIM_TYPE_FLOAT,
+        PRIM_TYPE_COLOR,
+        PRIM_TYPE_VECTOR,
+        PRIM_TYPE_POINT
+    };
+    static const size_t tag_count = sizeof(tags) / sizeof(tags[0]);
+    for (size_t i = 0; i < tag_count; ++i) {
+        append_builtin(&builtins->deriv_functions, make_unary_function(builtins, BUILTIN_DX, tags[i], tags[i]));
+        append_builtin(&builtins->deriv_functions, make_unary_function(builtins, BUILTIN_DY, tags[i], tags[i]));
+        append_builtin(&builtins->deriv_functions, make_unary_function(builtins, BUILTIN_DZ, tags[i], tags[i]));
+    }
+    append_builtin(&builtins->deriv_functions, make_unary_function(builtins, BUILTIN_FILTERWIDTH, PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
+    append_builtin(&builtins->deriv_functions, make_unary_function(builtins, BUILTIN_FILTERWIDTH, PRIM_TYPE_VECTOR, PRIM_TYPE_POINT));
+    append_builtin(&builtins->deriv_functions, make_unary_function(builtins, BUILTIN_FILTERWIDTH, PRIM_TYPE_VECTOR, PRIM_TYPE_VECTOR));
+    append_builtin(&builtins->deriv_functions, make_unary_function(builtins, BUILTIN_AREA, PRIM_TYPE_FLOAT, PRIM_TYPE_POINT));
+    append_builtin(&builtins->deriv_functions, make_unary_function(builtins, BUILTIN_CALCULATENORMAL, PRIM_TYPE_VECTOR, PRIM_TYPE_POINT));
+    append_builtin(&builtins->deriv_functions, make_binary_function(builtins, BUILTIN_AASTEP, PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
+    append_builtin(&builtins->deriv_functions, make_ternary_function(builtins, BUILTIN_AASTEP, PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
+    append_builtin(&builtins->deriv_functions, make_builtin_function(builtins, BUILTIN_AASTEP, false, PRIM_TYPE_FLOAT, 4,
+        (struct builtin_param[]) {
+            { PRIM_TYPE_FLOAT, false },
+            { PRIM_TYPE_FLOAT, false },
+            { PRIM_TYPE_FLOAT, false },
+            { PRIM_TYPE_FLOAT, false }
+        }));
+}
+
+static void register_displace_functions(struct builtins* builtins) {
+    static const enum builtin_tag builtin_tags[] = { BUILTIN_DISPLACE, BUILTIN_BUMP };
+    static const size_t builtin_tag_count = sizeof(builtin_tags) / sizeof(builtin_tags[0]);
+    for (size_t i = 0; i < builtin_tag_count; ++i) {
+        append_builtin(&builtins->displace_functions, make_unary_function(builtins, builtin_tags[i], PRIM_TYPE_VOID, PRIM_TYPE_FLOAT));
+        append_builtin(&builtins->displace_functions, make_binary_function(builtins, builtin_tags[i], PRIM_TYPE_VOID, PRIM_TYPE_STRING, PRIM_TYPE_FLOAT));
+        append_builtin(&builtins->displace_functions, make_unary_function(builtins, builtin_tags[i], PRIM_TYPE_VOID, PRIM_TYPE_VECTOR));
+    }
+}
+
+static void register_string_functions(struct builtins* builtins) {
+    append_builtin(&builtins->string_functions, make_builtin_function(builtins, BUILTIN_PRINTF, true, PRIM_TYPE_VOID, 1,
+        (struct builtin_param[]) { { PRIM_TYPE_STRING, false } }));
+    append_builtin(&builtins->string_functions, make_builtin_function(builtins, BUILTIN_ERROR, true, PRIM_TYPE_VOID, 1,
+        (struct builtin_param[]) { { PRIM_TYPE_STRING, false } }));
+    append_builtin(&builtins->string_functions, make_builtin_function(builtins, BUILTIN_WARNING, true, PRIM_TYPE_VOID, 1,
+        (struct builtin_param[]) { { PRIM_TYPE_STRING, false } }));
+    append_builtin(&builtins->string_functions, make_builtin_function(builtins, BUILTIN_FORMAT, true, PRIM_TYPE_STRING, 1,
+        (struct builtin_param[]) { { PRIM_TYPE_STRING, false } }));
+    append_builtin(&builtins->string_functions, make_builtin_function(builtins, BUILTIN_FPRINTF, true, PRIM_TYPE_VOID, 2,
+        (struct builtin_param[]) { { PRIM_TYPE_STRING, false }, { PRIM_TYPE_STRING, false } }));
+    append_builtin(&builtins->string_functions, make_binary_function(builtins, BUILTIN_CONCAT, PRIM_TYPE_STRING, PRIM_TYPE_STRING, PRIM_TYPE_STRING));
+    append_builtin(&builtins->string_functions, make_unary_function(builtins, BUILTIN_STRLEN, PRIM_TYPE_INT, PRIM_TYPE_STRING));
+    append_builtin(&builtins->string_functions, make_binary_function(builtins, BUILTIN_STARTSWITH, PRIM_TYPE_BOOL, PRIM_TYPE_STRING, PRIM_TYPE_STRING));
+    append_builtin(&builtins->string_functions, make_binary_function(builtins, BUILTIN_ENDSWITH, PRIM_TYPE_BOOL, PRIM_TYPE_STRING, PRIM_TYPE_STRING));
+    append_builtin(&builtins->string_functions, make_unary_function(builtins, BUILTIN_STOI, PRIM_TYPE_INT, PRIM_TYPE_STRING));
+    append_builtin(&builtins->string_functions, make_unary_function(builtins, BUILTIN_STOF, PRIM_TYPE_FLOAT, PRIM_TYPE_STRING));
+    append_builtin(&builtins->string_functions, make_split_function(builtins, 2));
+    append_builtin(&builtins->string_functions, make_split_function(builtins, 3));
+    append_builtin(&builtins->string_functions, make_split_function(builtins, 4));
+    append_builtin(&builtins->string_functions, make_binary_function(builtins, BUILTIN_SUBSTR, PRIM_TYPE_STRING, PRIM_TYPE_STRING, PRIM_TYPE_INT));
+    append_builtin(&builtins->string_functions, make_ternary_function(builtins, BUILTIN_SUBSTR, PRIM_TYPE_STRING, PRIM_TYPE_STRING, PRIM_TYPE_INT, PRIM_TYPE_INT));
+    append_builtin(&builtins->string_functions, make_binary_function(builtins, BUILTIN_GETCHAR, PRIM_TYPE_INT, PRIM_TYPE_STRING, PRIM_TYPE_INT));
+    append_builtin(&builtins->string_functions, make_unary_function(builtins, BUILTIN_HASH, PRIM_TYPE_INT, PRIM_TYPE_STRING));
+    append_builtin(&builtins->string_functions, make_binary_function(builtins, BUILTIN_REGEX_SEARCH, PRIM_TYPE_INT, PRIM_TYPE_STRING, PRIM_TYPE_STRING));
+    append_builtin(&builtins->string_functions, make_binary_function(builtins, BUILTIN_REGEX_MATCH, PRIM_TYPE_INT, PRIM_TYPE_STRING, PRIM_TYPE_STRING));
+    append_builtin(&builtins->string_functions, make_regex_function(builtins, BUILTIN_REGEX_SEARCH));
+    append_builtin(&builtins->string_functions, make_regex_function(builtins, BUILTIN_REGEX_MATCH));
+}
+
+static void register_texture_functions(struct builtins* builtins) {
+    append_builtin(&builtins->texture_functions, make_texture_function(builtins, false, PRIM_TYPE_FLOAT));
+    append_builtin(&builtins->texture_functions, make_texture_function(builtins, false, PRIM_TYPE_COLOR));
+    append_builtin(&builtins->texture_functions, make_texture_function(builtins, true, PRIM_TYPE_FLOAT));
+    append_builtin(&builtins->texture_functions, make_texture_function(builtins, true, PRIM_TYPE_COLOR));
+
+    append_builtin(&builtins->texture_functions, make_texture3d_function(builtins, false, PRIM_TYPE_FLOAT));
+    append_builtin(&builtins->texture_functions, make_texture3d_function(builtins, false, PRIM_TYPE_COLOR));
+    append_builtin(&builtins->texture_functions, make_texture3d_function(builtins, true, PRIM_TYPE_FLOAT));
+    append_builtin(&builtins->texture_functions, make_texture3d_function(builtins, true, PRIM_TYPE_COLOR));
+
+    append_builtin(&builtins->texture_functions, make_environment_function(builtins, false, PRIM_TYPE_FLOAT));
+    append_builtin(&builtins->texture_functions, make_environment_function(builtins, false, PRIM_TYPE_COLOR));
+    append_builtin(&builtins->texture_functions, make_environment_function(builtins, true, PRIM_TYPE_FLOAT));
+    append_builtin(&builtins->texture_functions, make_environment_function(builtins, true, PRIM_TYPE_COLOR));
+
+    static const enum prim_type_tag tags[] = {
+        PRIM_TYPE_FLOAT,
+        PRIM_TYPE_INT,
+        PRIM_TYPE_STRING,
+        PRIM_TYPE_VECTOR,
+        PRIM_TYPE_POINT,
+        PRIM_TYPE_NORMAL,
+        PRIM_TYPE_COLOR,
+        PRIM_TYPE_MATRIX,
+    };
+    static const size_t tag_count = sizeof(tags) / sizeof(tags[0]);
+    for (size_t i = 0; i < tag_count; ++i) {
+        const struct type* output_type = type_table_make_prim_type(builtins->type_table, tags[i]);
+        const struct type* output_array_type = type_table_make_unsized_array_type(builtins->type_table, output_type);
+        append_builtin(&builtins->texture_functions, make_gettextureinfo_function(builtins, false, output_type));
+        append_builtin(&builtins->texture_functions, make_gettextureinfo_function(builtins, true,  output_type));
+        append_builtin(&builtins->texture_functions, make_gettextureinfo_function(builtins, false, output_array_type));
+        append_builtin(&builtins->texture_functions, make_gettextureinfo_function(builtins, true,  output_array_type));
+        append_builtin(&builtins->texture_functions, make_pointcloud_get_function(builtins, tags[i]));
+    }
+    append_builtin(&builtins->texture_functions, make_pointcloud_search_function(builtins, true));
+    append_builtin(&builtins->texture_functions, make_pointcloud_search_function(builtins, false));
+    append_builtin(&builtins->texture_functions, make_pointcloud_write_function(builtins));
 }
 
 static void register_triple_constructors(struct builtins* builtins, enum prim_type_tag tag) {
@@ -486,6 +828,10 @@ struct builtins* builtins_create(struct type_table* type_table) {
     register_color_functions(builtins);
     register_matrix_functions(builtins);
     register_pattern_gen_functions(builtins);
+    register_deriv_functions(builtins);
+    register_displace_functions(builtins);
+    register_string_functions(builtins);
+    register_texture_functions(builtins);
 
     register_scalar_constructors(builtins, PRIM_TYPE_BOOL);
     register_scalar_constructors(builtins, PRIM_TYPE_INT);
@@ -531,6 +877,10 @@ void builtins_populate_env(const struct builtins* builtins, struct env* env) {
     insert_builtins(env, builtins->color_functions, true);
     insert_builtins(env, builtins->matrix_functions, true);
     insert_builtins(env, builtins->pattern_gen_functions, true);
+    insert_builtins(env, builtins->deriv_functions, true);
+    insert_builtins(env, builtins->displace_functions, true);
+    insert_builtins(env, builtins->string_functions, true);
+    insert_builtins(env, builtins->texture_functions, true);
     insert_builtins(env, builtins->operators, true);
 }
 
