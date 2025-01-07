@@ -250,14 +250,6 @@ struct env;
 struct mem_pool;
 struct type_table;
 
-enum builtin_tag {
-#define x(name, ...) BUILTIN_##name,
-    BUILTIN_LIST(x)
-#undef x
-};
-
-[[nodiscard]] const char* builtin_tag_to_string(enum builtin_tag);
-
 [[nodiscard]] struct builtins* builtins_create(struct type_table*);
 void builtins_destroy(struct builtins*);
 

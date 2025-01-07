@@ -14,10 +14,10 @@
 #include <stdlib.h>
 
 struct type_checker {
+    const struct builtins* builtins;
     struct type_print_options type_print_options;
     struct mem_pool* mem_pool;
     struct type_table* type_table;
-    const struct builtins* builtins;
     struct env* env;
     struct log* log;
 };
@@ -198,11 +198,18 @@ static inline void insert_cast(
     ast->type = type;
 }
 
-static inline bool is_safely_coercible_int_literal(struct ast* ast) {
+static inline struct const_eval eval_const_int(struct type_checker*, struct ast* ast) {
+    // TODO: Use IR emitter for constants
     ast = ast_skip_parens(ast);
-    return
-        ast->tag == AST_INT_LITERAL &&
-        ((int)(float)(int)ast->int_literal) == ((int)ast->int_literal);
+    return (struct const_eval) {
+        .is_const = ast->tag == AST_INT_LITERAL,
+        .int_val = ast->int_literal
+    };
+}
+
+static inline bool is_safely_coercible_int_literal(struct type_checker* type_checker, struct ast* ast) {
+    struct const_eval const_eval = eval_const_int(type_checker, ast);
+    return const_eval.is_const && ((int)((float)const_eval.int_val)) == const_eval.int_val;
 }
 
 static inline const struct type* coerce_expr(
@@ -216,7 +223,7 @@ static inline const struct type* coerce_expr(
 
     enum coercion_rank coercion_rank = type_coercion_rank(ast->type, expected_type);
     if (coercion_rank != COERCION_IMPOSSIBLE) {
-        if (type_coercion_is_lossy(ast->type, expected_type) && !is_safely_coercible_int_literal(ast)) {
+        if (type_coercion_is_lossy(ast->type, expected_type) && !is_safely_coercible_int_literal(type_checker, ast)) {
             report_lossy_coercion(type_checker, &ast->loc, ast->type, expected_type);
         } else if (type_coercion_is_incomplete(ast->type, expected_type)) {
             report_incomplete_coercion(type_checker, &ast->loc, ast->type, expected_type);
@@ -231,14 +238,6 @@ static inline const struct type* coerce_expr(
 static inline void expect_mutable(struct type_checker* type_checker, struct ast* ast) {
     if (!ast_is_mutable(ast))
         log_error(type_checker->log, &ast->loc, "value cannot be written to");
-}
-
-static inline struct const_eval eval_const_int(struct type_checker*, struct ast* ast) {
-    // TODO: Use IR emitter for constants
-    return (struct const_eval) {
-        .is_const = ast->tag == AST_INT_LITERAL,
-        .int_val = ast->int_literal
-    };
 }
 
 static const struct type* check_prim_type(struct type_checker* type_checker, struct ast* ast) {
@@ -301,20 +300,31 @@ static const struct type* check_array_dim(
     }
 }
 
-static const struct type* check_var(struct type_checker* type_checker, struct ast* ast, const struct type* type) {
+static const struct type* check_var(
+    struct type_checker* type_checker,
+    struct ast* ast,
+    const struct type* type,
+    bool is_global)
+{
     insert_symbol(type_checker, ast->var.name, ast, false);
     type = check_array_dim(type_checker, ast->var.dim, type, false);
-    if (ast->var.init)
+    if (ast->var.init) {
+        if (is_global)
+            log_error(type_checker->log, &ast->var.init->loc, "built-in global variables cannot be initialized");
         check_expr(type_checker, ast->var.init, type);
+    }
     return ast->type = type;
 }
 
-static void check_var_decl(struct type_checker* type_checker, struct ast* ast) {
+static void check_var_decl(struct type_checker* type_checker, struct ast* ast, bool is_global) {
+    if (is_global && !ast_find_attr(ast, "builtin"))
+        log_error(type_checker->log, &ast->loc, "only built-in variables can be global");
+
     const struct type* type = check_type(type_checker, ast->var_decl.type);
     if (type_is_void(type))
         report_invalid_type_with_msg(type_checker, &ast->loc, type, "variable");
     for (struct ast* var = ast->var_decl.vars; var; var = var->next)
-        check_var(type_checker, var, type);
+        check_var(type_checker, var, type, is_global);
 }
 
 static void check_block_without_scope(struct type_checker* type_checker, struct ast* ast) {
@@ -330,16 +340,25 @@ static void check_block(struct type_checker* type_checker, struct ast* ast) {
 }
 
 static void check_param(struct type_checker* type_checker, struct ast* ast) {
+    if (ast->param.is_ellipsis)
+        return;
     ast->type = check_type(type_checker, ast->param.type);
     if (type_is_void(ast->type))
         report_invalid_type_with_msg(type_checker, &ast->loc, ast->type, "parameter");
     ast->type = check_array_dim(type_checker, ast->param.dim, ast->type, true);
-    insert_symbol(type_checker, ast->param.name, ast, false);
+    if (ast->param.name)
+        insert_symbol(type_checker, ast->param.name, ast, false);
 }
 
-static void check_params(struct type_checker* type_checker, struct ast* ast) {
-    for (; ast; ast = ast->next)
+static bool check_params(struct type_checker* type_checker, struct ast* ast) {
+    bool has_ellipsis = false;
+    for (; ast; ast = ast->next) {
+        has_ellipsis |= ast->param.is_ellipsis;
+        if (ast->param.is_ellipsis && ast->next)
+            log_error(type_checker->log, &ast->loc, "'...' is only valid at the end of a parameter list");
         check_param(type_checker, ast);
+    }
+    return has_ellipsis;
 }
 
 static inline struct ast* find_conflicting_overload(
@@ -367,36 +386,58 @@ static void check_shader_or_func_decl(struct type_checker* type_checker, struct 
 
     bool is_shader_decl = ast->tag == AST_SHADER_DECL;
     struct ast* params = is_shader_decl ? ast->shader_decl.params : ast->func_decl.params;
-    check_params(type_checker, params);
+    bool has_ellipsis = check_params(type_checker, params);
 
     const struct type* ret_type = check_type(type_checker,
         is_shader_decl ? ast->shader_decl.type : ast->func_decl.ret_type);
 
+    bool is_constructor = ast_find_attr(ast, "constructor");
+    if (is_constructor && (ret_type->tag != TYPE_PRIM || ret_type->prim_type == PRIM_TYPE_VOID)) {
+        log_error(type_checker->log, &ast->loc, "constructors must return a constructible primitive type");
+    }
+
     struct small_func_param_vec func_params;
     small_func_param_vec_init(&func_params);
     for (struct ast* param = params; param; param = param->next) {
+        if (param->param.is_ellipsis)
+            continue;
         small_func_param_vec_push(&func_params, &(struct func_param) {
             .type = param->type,
             .is_output = param->param.is_output
         });
     }
     ast->type = type_table_make_func_type(
-        type_checker->type_table, ret_type, func_params.elems, func_params.elem_count, false);
+        type_checker->type_table, ret_type, func_params.elems, func_params.elem_count, has_ellipsis);
     small_func_param_vec_destroy(&func_params);
 
-    check_block_without_scope(type_checker, ast->func_decl.body);
+    // Built-in functions should not have a function body.
+    bool is_builtin = ast_find_attr(ast, "builtin");
+    if (has_ellipsis && !is_builtin)
+        log_error(type_checker->log, &ast->loc, "'...' is only allowed on built-in functions");
+    if (ast->func_decl.body) {
+        if (is_builtin)
+            log_error(type_checker->log, &ast->loc, "built-in function cannot have a body");
+        check_block_without_scope(type_checker, ast->func_decl.body);
+    } else if (!is_builtin) {
+        log_error(type_checker->log, &ast->loc, "missing function body");
+    }
+
     env_pop_scope(type_checker->env);
 
-    const char* decl_name = ast_decl_name(ast);
-    struct ast* conflicting_overload = find_conflicting_overload(type_checker, decl_name, ast->type);
-    if (conflicting_overload) {
-        char* type_string = type_to_string(ast->type, &type_checker->type_print_options);
-        log_error(type_checker->log, &ast->loc, "redefinition for %s '%s' with type '%s'",
-            ast->tag == AST_FUNC_DECL ? "function" : "shader", decl_name, type_string);
-        report_previous_location(type_checker, &conflicting_overload->loc);
-        free(type_string);
-    } else {
-        insert_symbol(type_checker, decl_name, ast, true);
+    // Constructors are not placed into the environment, as they are not invoked like "real"
+    // functions, but through a constructor expression instead.
+    if (!is_constructor) {
+        const char* decl_name = ast_decl_name(ast);
+        struct ast* conflicting_overload = find_conflicting_overload(type_checker, decl_name, ast->type);
+        if (conflicting_overload) {
+            char* type_string = type_to_string(ast->type, &type_checker->type_print_options);
+            log_error(type_checker->log, &ast->loc, "redefinition for %s '%s' with type '%s'",
+                ast->tag == AST_FUNC_DECL ? "function" : "shader", decl_name, type_string);
+            report_previous_location(type_checker, &conflicting_overload->loc);
+            free(type_string);
+        } else {
+            insert_symbol(type_checker, decl_name, ast, true);
+        }
     }
 }
 
@@ -478,7 +519,7 @@ static void check_stmt(struct type_checker* type_checker, struct ast* ast) {
     switch (ast->tag) {
         case AST_EMPTY_STMT:    break;
         case AST_BLOCK:         check_block(type_checker, ast);               break;
-        case AST_VAR_DECL:      check_var_decl(type_checker, ast);            break;
+        case AST_VAR_DECL:      check_var_decl(type_checker, ast, false);     break;
         case AST_FUNC_DECL:     check_shader_or_func_decl(type_checker, ast); break;
         case AST_RETURN_STMT:   check_return_stmt(type_checker, ast);         break;
         case AST_WHILE_LOOP:    check_while_loop(type_checker, ast);          break;
@@ -627,7 +668,7 @@ static struct ast* find_best_candidate(
     for (size_t i = 0; i < candidate_count; ++i) {
         if (candidates[i] == best_candidate)
             continue;
-        // Exit if an ambiguity is detected (when neither candidate is the best).
+        // Exit if an ambiguity is detected (when no candidate is the best).
         if (is_better_candidate(candidates[i], best_candidate, ret_type, args))
             return NULL;
     }
@@ -657,12 +698,7 @@ static struct ast* find_func_from_candidates(
         return candidates[0];
     }
 
-    // Try without the return type first.
-    struct ast* symbol = find_best_candidate(candidates, viable_count, NULL, args);
-    if (!symbol && ret_type) {
-        // Try once more with the return type, if we have one available.
-        symbol = find_best_candidate(candidates, viable_count, ret_type, args);
-    }
+    struct ast* symbol = find_best_candidate(candidates, viable_count, ret_type, args);
     if (!symbol) {
         report_overload_error(
             type_checker, loc, "ambiguous", func_name, candidates, viable_count, ret_type, args);
@@ -1043,7 +1079,7 @@ static void check_struct_decl(struct type_checker* type_checker, struct ast* ast
         const struct type* field_type = check_type(type_checker, field->var_decl.type);
         for (struct ast* var = field->var_decl.vars; var; var = var->next) {
             struct struct_field* struct_field = &struct_type->struct_type.fields[field_index++];
-            check_var(type_checker, var, field_type);
+            check_var(type_checker, var, field_type, false);
             struct_field->name = var->var.name;
             struct_field->type = var->type;
         }
@@ -1063,6 +1099,9 @@ static void check_top_level_decl(struct type_checker* type_checker, struct ast* 
         case AST_SHADER_DECL:
         case AST_FUNC_DECL:
             check_shader_or_func_decl(type_checker, ast);
+            break;
+        case AST_VAR_DECL:
+            check_var_decl(type_checker, ast, true);
             break;
         default:
             assert(false && "invalid declaration");

@@ -2,6 +2,8 @@
 
 #include <assert.h>
 
+VEC_IMPL(token_vec, struct token, PUBLIC)
+
 const char* token_tag_to_string(enum token_tag tag) {
     switch (tag) {
 #define x(tag, str, ...) case TOKEN_##tag: return str;
@@ -35,7 +37,7 @@ bool token_tag_is_keyword(enum token_tag tag) {
     }
 }
 
-struct str_view token_str_view(const char* data, const struct token* token) {
+struct str_view token_view(const char* data, const struct token* token) {
     return (struct str_view) {
         .data = data + token->loc.begin.bytes,
         .length = token->loc.end.bytes - token->loc.begin.bytes

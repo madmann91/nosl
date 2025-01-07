@@ -10,428 +10,330 @@
 
 struct builtins {
     struct ast* constructors[PRIM_TYPE_COUNT];
-    struct ast* global_variables;
-    struct ast* math_functions;
-    struct ast* geom_functions;
-    struct ast* color_functions;
-    struct ast* matrix_functions;
-    struct ast* pattern_gen_functions;
-    struct ast* deriv_functions;
-    struct ast* displace_functions;
-    struct ast* string_functions;
-    struct ast* texture_functions;
-    struct ast* constants;
-    struct ast* operators;
+    struct ast* functions;
+    struct ast* globals;
     struct mem_pool mem_pool;
     struct type_table* type_table;
 };
 
-struct builtin_param {
-    enum prim_type_tag tag;
-    bool is_output;
-};
-
-static inline struct ast* alloc_builtin(struct builtins* builtins, enum builtin_tag tag, const struct type* type) {
-    struct ast* ast = MEM_POOL_ALLOC(builtins->mem_pool, struct ast);
-    memset(ast, 0, sizeof(struct ast));
-    ast->tag = AST_BUILTIN;
-    ast->type = type;
-    ast->builtin.tag = tag;
-    return ast;
-}
-
-static inline void append_builtin(struct ast** builtin_list, struct ast* builtin) {
-    builtin->next = *builtin_list;
-    *builtin_list = builtin;
-}
-
-static inline struct ast* make_global_variable_or_constant(
-    struct builtins* builtins,
-    enum prim_type_tag type_tag,
-    enum builtin_tag builtin_tag)
-{
-    return alloc_builtin(builtins, builtin_tag, type_table_make_prim_type(builtins->type_table, type_tag));
-}
-
-static inline struct ast* make_builtin_function(
-    struct builtins* builtins,
-    enum builtin_tag builtin_tag,
-    bool has_ellipsis,
-    enum prim_type_tag ret_tag,
-    size_t param_count,
-    struct builtin_param params[param_count])
-{
-    const struct type* ret_type = type_table_make_prim_type(builtins->type_table, ret_tag);
-    const struct type* last_type = ret_type;
-    enum prim_type_tag last_tag = ret_tag;
-
-    struct small_func_param_vec func_params;
-    small_func_param_vec_init(&func_params);
-    for (size_t i = 0; i < param_count; ++i) {
-        const struct type* type = last_tag == params[i].tag
-            ? last_type : type_table_make_prim_type(builtins->type_table, params[i].tag);
-        small_func_param_vec_push(&func_params, &(struct func_param) { type, params[i].is_output });
-        last_tag = params[i].tag;
-        last_type = type;
-    }
-
-    const struct type* builtin_type =
-        type_table_make_func_type(builtins->type_table, ret_type, func_params.elems, param_count, has_ellipsis);
-    small_func_param_vec_destroy(&func_params);
-    return alloc_builtin(builtins, builtin_tag, builtin_type);
-}
-
-static inline enum builtin_tag prim_type_tag_to_constructor_tag(enum prim_type_tag tag) {
-    switch (tag) {
-#define x(name, ...) case PRIM_TYPE_##name: return BUILTIN_##name;
-        BUILTIN_CONSTRUCTORS(x)
-#undef x
-        default:
-            assert(false && "invalid primitive type");
-            return BUILTIN_FLOAT;
-    }
-}
-
-static inline struct ast* make_unary_function(
-    struct builtins* builtins,
-    enum builtin_tag builtin_tag,
-    enum prim_type_tag ret_tag,
-    enum prim_type_tag arg_tag)
-{
-    return make_builtin_function(builtins, builtin_tag, false, ret_tag, 1, (struct builtin_param[]) { { arg_tag, false } });
-}
-
-static inline struct ast* make_binary_function(
-    struct builtins* builtins,
-    enum builtin_tag builtin_tag,
-    enum prim_type_tag ret_tag,
-    enum prim_type_tag first_arg_tag,
-    enum prim_type_tag second_arg_tag)
-{
-    return make_builtin_function(builtins, builtin_tag, false, ret_tag, 2,
-        (struct builtin_param[]) { { first_arg_tag, false }, { second_arg_tag, false } });
-}
-
-static inline struct ast* make_ternary_function(
-    struct builtins* builtins,
-    enum builtin_tag builtin_tag,
-    enum prim_type_tag ret_tag,
-    enum prim_type_tag first_arg_tag,
-    enum prim_type_tag second_arg_tag,
-    enum prim_type_tag third_arg_tag)
-{
-    return make_builtin_function(builtins, builtin_tag, false, ret_tag, 3,
-        (struct builtin_param[]) { { first_arg_tag, false }, { second_arg_tag, false }, { third_arg_tag, false } });
-}
-
-static inline struct ast* make_single_param_constructor(struct builtins* builtins, enum prim_type_tag ret_tag, enum prim_type_tag arg_tag) {
-    return make_unary_function(builtins, prim_type_tag_to_constructor_tag(ret_tag), ret_tag, arg_tag);
-}
-
-static inline struct ast* make_triple_constructor_from_components(struct builtins* builtins, enum prim_type_tag tag, bool has_space) {
-    return make_builtin_function(builtins, prim_type_tag_to_constructor_tag(tag), false, tag, has_space ? 4 : 3,
-        (struct builtin_param[]) {
-            { PRIM_TYPE_STRING, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false }
-        } + (has_space ? 0 : 1));
-}
-
-static inline struct ast* make_matrix_constructor_from_components(struct builtins* builtins, bool has_space) {
-    return make_builtin_function(builtins, BUILTIN_MATRIX, false, PRIM_TYPE_MATRIX, has_space ? 17 : 16,
-        (struct builtin_param[]) {
-            { PRIM_TYPE_STRING, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, false }
-        } + (has_space ? 0 : 1));
-}
-
-static inline struct ast* make_matrix_constructor_from_spaces(struct builtins* builtins) {
-    return make_builtin_function(builtins, BUILTIN_MATRIX, false, PRIM_TYPE_MATRIX, 2,
-        (struct builtin_param[]) {
-            { PRIM_TYPE_STRING, false },
-            { PRIM_TYPE_STRING, false }
-        });
-}
-
-static inline struct ast* make_fresnel_function(struct builtins* builtins) {
-    return make_builtin_function(builtins, BUILTIN_FRESNEL, false, PRIM_TYPE_VOID, 7,
-        (struct builtin_param[]) {
-            { PRIM_TYPE_VECTOR, false },
-            { PRIM_TYPE_NORMAL, false },
-            { PRIM_TYPE_FLOAT, false },
-            { PRIM_TYPE_FLOAT, true },
-            { PRIM_TYPE_FLOAT, true },
-            { PRIM_TYPE_VECTOR, true },
-            { PRIM_TYPE_VECTOR, true },
-        });
-}
-
-static inline struct ast* make_spline_function(struct builtins* builtins, enum prim_type_tag tag, bool has_size) {
-    const struct type* ret_type   = type_table_make_prim_type(builtins->type_table, tag);
-    const struct type* array_type = type_table_make_unsized_array_type(builtins->type_table, ret_type);
-    return alloc_builtin(builtins, BUILTIN_SPLINE, type_table_make_func_type(builtins->type_table,
-        ret_type,
-        (struct func_param[]) {
-            { type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING), false },
-            { type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT), false },
-            { has_size ? type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT) : array_type, false },
-            { array_type, false },
-        }, has_size ? 4 : 3, false));
-}
-
-static inline struct ast* make_split_function(struct builtins* builtins, size_t param_count) {
-    assert(param_count == 2 || param_count == 3 || param_count == 4);
-    const struct type* int_type          = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT);
-    const struct type* string_type       = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
-    const struct type* string_array_type = type_table_make_unsized_array_type(builtins->type_table, string_type);
-    const struct func_param func_params[] = {
-        { string_type, false },
-        { string_array_type, true },
-        { string_type, false },
-        { int_type, false }
-    };
-    return alloc_builtin(builtins, BUILTIN_SPLIT,
-        type_table_make_func_type(builtins->type_table, int_type, func_params, param_count, false));
-}
-
-static inline struct ast* make_regex_function(struct builtins* builtins, enum builtin_tag tag) {
-    const struct type* int_type       = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT);
-    const struct type* string_type    = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
-    const struct type* int_array_type = type_table_make_unsized_array_type(builtins->type_table, int_type);
-    const struct func_param func_params[] = {
-        { string_type, false },
-        { int_array_type, false },
-        { string_type, false }
-    };
-    return alloc_builtin(builtins, tag,
-        type_table_make_func_type(builtins->type_table, int_type, func_params, 3, false));
-}
-
-static inline struct ast* make_texture_function(struct builtins* builtins, bool takes_dxdy, enum prim_type_tag ret_tag) {
-    const struct type* ret_type    = type_table_make_prim_type(builtins->type_table, ret_tag);
-    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
-    const struct type* float_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT);
-    const struct func_param func_params[] = {
-        { string_type, false },
-        { float_type, false },
-        { float_type, false },
-        { float_type, false },
-        { float_type, false },
-        { float_type, false },
-        { float_type, false }
-    };
-    return alloc_builtin(builtins, BUILTIN_TEXTURE,
-        type_table_make_func_type(builtins->type_table, ret_type, func_params, takes_dxdy ? 7 : 3, true));
-}
-
-static inline struct ast* make_texture3d_function(struct builtins* builtins, bool takes_dxdy, enum prim_type_tag ret_tag) {
-    const struct type* ret_type    = type_table_make_prim_type(builtins->type_table, ret_tag);
-    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
-    const struct type* point_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_POINT);
-    const struct type* vector_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_VECTOR);
-    const struct func_param func_params[] = {
-        { string_type, false },
-        { point_type, false },
-        { vector_type, false },
-        { vector_type, false },
-        { vector_type, false }
-    };
-    return alloc_builtin(builtins, BUILTIN_TEXTURE3D,
-        type_table_make_func_type(builtins->type_table, ret_type, func_params, takes_dxdy ? 5 : 2, true));
-}
-
-static inline struct ast* make_environment_function(struct builtins* builtins, bool takes_dxdy, enum prim_type_tag ret_tag) {
-    const struct type* ret_type    = type_table_make_prim_type(builtins->type_table, ret_tag);
-    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
-    const struct type* vector_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_VECTOR);
-    const struct func_param func_params[] = {
-        { string_type, false },
-        { vector_type, false },
-        { vector_type, false },
-        { vector_type, false }
-    };
-    return alloc_builtin(builtins, BUILTIN_ENVIRONMENT,
-        type_table_make_func_type(builtins->type_table, ret_type, func_params, takes_dxdy ? 4 : 2, true));
-}
-
-static inline struct ast* make_gettextureinfo_function(struct builtins* builtins, bool takes_coords, const struct type* output_type) {
-    const struct type* int_type    = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT);
-    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
-    const struct type* float_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT);
-    const struct func_param params_without_coords[] = {
-        { string_type, false },
-        { string_type, false },
-        { output_type, true  },
-    };
-    const struct func_param params_with_coords[] = {
-        { string_type, false },
-        { float_type, false },
-        { float_type, false },
-        { string_type, false },
-        { output_type, true  },
-    };
-    const struct func_param* func_params = takes_coords ? params_with_coords : params_without_coords;
-    return alloc_builtin(builtins, BUILTIN_GETTEXTUREINFO,
-        type_table_make_func_type(builtins->type_table, int_type, func_params, takes_coords ? 5 : 3, false));
-}
-
-static inline struct ast* make_pointcloud_search_function(struct builtins* builtins, bool takes_sort) {
-    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
-    const struct type* point_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_POINT);
-    const struct type* float_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_FLOAT);
-    const struct type* int_type    = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT);
-    const struct func_param func_params[] = {
-        { string_type, false },
-        { point_type, false },
-        { float_type, false },
-        { int_type, false },
-        { int_type, false },
-    };
-    return alloc_builtin(builtins, BUILTIN_POINTCLOUD_SEARCH,
-        type_table_make_func_type(builtins->type_table, int_type, func_params, takes_sort ? 5 : 4, true));
-}
-
-static inline struct ast* make_pointcloud_get_function(struct builtins* builtins, enum prim_type_tag output_tag) {
-    const struct type* string_type    = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
-    const struct type* output_type    = type_table_make_prim_type(builtins->type_table, output_tag);
-    const struct type* int_type       = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT);
-    const struct type* int_array_type = type_table_make_unsized_array_type(builtins->type_table, int_type);
-    const struct func_param func_params[] = {
-        { string_type, false },
-        { int_array_type, false },
-        { int_type, false },
-        { string_type, false },
-        { output_type, true }
-    };
-    return alloc_builtin(builtins, BUILTIN_POINTCLOUD_SEARCH,
-        type_table_make_func_type(builtins->type_table, int_type, func_params, 5, false));
-}
-
-static inline struct ast* make_pointcloud_write_function(struct builtins* builtins) {
-    const struct type* string_type = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_STRING);
-    const struct type* point_type  = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_POINT);
-    const struct type* int_type    = type_table_make_prim_type(builtins->type_table, PRIM_TYPE_INT);
-    const struct func_param func_params[] = {
-        { string_type, false },
-        { point_type, false }
-    };
-    return alloc_builtin(builtins, BUILTIN_POINTCLOUD_SEARCH,
-        type_table_make_func_type(builtins->type_table, int_type, func_params, 2, true));
-}
-
-static void register_constants(struct builtins* builtins) {
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_PI));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_PI_2));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_2_PI));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_2PI));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_4PI));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_2_SQRTPI));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_E));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_LN2));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_LN10));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_LOG2E));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_LOG10E));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_SQRT2));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_M_SQRT1_2));
-}
-
-static void register_global_variables(struct builtins* builtins) {
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_POINT, BUILTIN_P));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_VECTOR, BUILTIN_I));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_NORMAL, BUILTIN_N));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_NORMAL, BUILTIN_NG));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_VECTOR, BUILTIN_DPDU));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_VECTOR, BUILTIN_DPDV));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_POINT, BUILTIN_PS));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_U));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_V));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_TIME));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_FLOAT, BUILTIN_DTIME));
-    append_builtin(&builtins->constants, make_global_variable_or_constant(builtins, PRIM_TYPE_VECTOR, BUILTIN_DPDTIME));
-
-    append_builtin(&builtins->constants,
-        alloc_builtin(builtins, BUILTIN_CI, type_table_make_closure_type(
-            builtins->type_table, type_table_make_prim_type(builtins->type_table, PRIM_TYPE_COLOR))));
-}
-
-static void register_math_functions(struct builtins* builtins) {
-    static const enum prim_type_tag tags[] = { 
-        PRIM_TYPE_FLOAT,
-        PRIM_TYPE_COLOR,
-        PRIM_TYPE_VECTOR,
-        PRIM_TYPE_POINT,
-        PRIM_TYPE_NORMAL
-    };
-    static const size_t tag_count = sizeof(tags) / sizeof(tags[0]);
-    for (size_t i = 0; i < tag_count; ++i) {
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_RADIANS, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_DEGREES, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_COS, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_SIN, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_builtin_function(builtins, BUILTIN_SINCOS, false, PRIM_TYPE_VOID, 3,
-            (struct builtin_param[]) {
-                { tags[i], false },
-                { tags[i], true },
-                { tags[i], true },
-            }));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_TAN, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_COSH, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_SINH, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_TANH, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_ACOS, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_ASIN, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_ATAN, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_binary_function(builtins, BUILTIN_ATAN2, tags[i], tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_binary_function(builtins, BUILTIN_POW, tags[i], tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_EXP, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_EXP2, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_EXPM1, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_LOG, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_LOG2, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_LOG10, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_LOGB, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_binary_function(builtins, BUILTIN_LOG, tags[i], PRIM_TYPE_FLOAT, tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_SQRT, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_INVERSESQRT, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_CBRT, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_ABS, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_FABS, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_SIGN, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_FLOOR, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_CEIL, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_ROUND, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_TRUNC, tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_binary_function(builtins, BUILTIN_MOD, tags[i], tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_binary_function(builtins, BUILTIN_FMOD, tags[i], tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_binary_function(builtins, BUILTIN_MIN, tags[i], tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_binary_function(builtins, BUILTIN_MAX, tags[i], tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_ternary_function(builtins, BUILTIN_CLAMP, tags[i], tags[i], tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_ternary_function(builtins, BUILTIN_MIX, tags[i], tags[i], tags[i], tags[i]));
-        append_builtin(&builtins->math_functions, make_ternary_function(builtins, BUILTIN_SELECT, tags[i], tags[i], tags[i], tags[i]));
-    }
-    append_builtin(&builtins->math_functions, make_binary_function(builtins, BUILTIN_HYPOT, PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
-    append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_ISNAN, PRIM_TYPE_BOOL, PRIM_TYPE_FLOAT));
-    append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_ISINF, PRIM_TYPE_BOOL, PRIM_TYPE_FLOAT));
-    append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_ISFINITE, PRIM_TYPE_BOOL, PRIM_TYPE_FLOAT));
-    append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_ERF, PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
-    append_builtin(&builtins->math_functions, make_unary_function(builtins, BUILTIN_ERFC, PRIM_TYPE_FLOAT, PRIM_TYPE_FLOAT));
-}
+#define SPLINE_FUNCTION(type) \
+    "__attribute__((builtin)) " type " spline(string, float, " type "[]);\n"
+#define SPLINE_FUNCTION_WITH_SIZE(type) \
+    "__attribute__((builtin)) " type " spline(string, float, int, " type "[]);\n"
+#define SPLIT_FUNCTION_WITH_SEP_AND_SIZE(type) \
+    "__attribute__((builtin)) int split(string, output string[], string, int);\n"
+#define SPLIT_FUNCTION_WITH_SEP(type) \
+    "__attribute__((builtin)) int split(string, output string[], string);\n"
+#define SPLIT_FUNCTION(type) \
+    "__attribute__((always_inline))\n" \
+    "int split(string str, output string results[]) { return split(str, results, \"\"); }\n"
+#define REGEX_FUNCTION(name) \
+    "__attribute__((builtin)) int " name "(string, int[], string);\n"
+#define TEXTURE_FUNCTION(type) \
+    "__attribute__((builtin)) " type " texture(string, float, float, ...);\n"
+#define TEXTURE_FUNCTION_WITH_DXDY(type) \
+    "__attribute__((builtin)) " type " texture(string, float, float, float, float, float, float, ...);\n"
+#define TEXTURE3D_FUNCTION(type) \
+    "__attribute__((builtin)) " type " texture3d(string, point, ...);\n"
+#define TEXTURE3D_FUNCTION_WITH_DXDY(type) \
+    "__attribute__((builtin)) " type " texture3d(string, point, vector, vector, vector, ...);\n"
+#define ENVIRONMENT_FUNCTION(type) \
+    "__attribute__((builtin)) " type " environment(string, vector, ...);\n"
+#define ENVIRONMENT_FUNCTION_WITH_DXDY(type) \
+    "__attribute__((builtin)) " type " environment(string, vector, vector, vector, ...);\n"
+#define GETTEXTUREINFO_FUNCTION(output_type) \
+    "__attribute__((builtin)) int gettextureinfo(string, string, output " output_type ");\n"
+#define GETTEXTUREINFO_FUNCTION_WITH_COORDS(output_type) \
+    "__attribute__((builtin)) int gettextureinfo(string, float, float, string, output " output_type ");\n"
+#define POINTCLOUD_SEARCH_FUNCTION \
+    "__attribute__((builtin)) int pointcloud_search(string, point, float, int, ...);\n"
+#define POINTCLOUD_SEARCH_FUNCTION_WITH_SORT \
+    "__attribute__((builtin)) int pointcloud_search(string, point, float, int, int, ...);\n"
+#define POINTCLOUD_GET_FUNCTION(output_type) \
+    "__attribute__((builtin)) int pointcloud_get(string, int[], int, string, output " output_type ");\n"
+#define POINTCLOUD_WRITE_FUNCTION(output_type) \
+    "__attribute__((builtin)) int pointcloud_write(string, point);\n" \
+#define GLOBAL_VARIABLES \
+    "__attribute__((builtin)) point P;\n" \
+    "__attribute__((builtin)) vector I;\n" \
+    "__attribute__((builtin)) normal N;\n" \
+    "__attribute__((builtin)) normal Ng;\n" \
+    "__attribute__((builtin)) vector dPdu;\n" \
+    "__attribute__((builtin)) vector dPdv;\n" \
+    "__attribute__((builtin)) point Ps;\n" \
+    "__attribute__((builtin)) float u;\n" \
+    "__attribute__((builtin)) float v;\n" \
+    "__attribute__((builtin)) float time;\n" \
+    "__attribute__((builtin)) float dtime;\n" \
+    "__attribute__((builtin)) vector dPdtime;\n" \
+    "__attribute__((builtin)) closure color Ci;\n"
+#define SINGLE_PARAMETER_CONSTRUCTOR(type, param_type) \
+    "__attribute__((constructor, always_inline))\n" \
+    type " __constructor__(" param_type " x) { return x; }\n"
+#define TRIPLE_CONSTRUCTOR_FROM_COMPONENTS(type) \
+    "__attribute__((constructor, always_inline))\n" \
+    type " __constructor__(float x, float y, float z) { return { x, y, z }; }\n"
+#define TRIPLE_CONSTRUCTOR_FROM_COMPONENTS_WITH_SPACE(type) \
+    "__attribute__((constructor, always_inline))\n" \
+    // Bool functions ------------------------------------------------------------------------------
+    "__attribute__((builtin)) bool __operator__bitand__(bool, bool);\n"
+    "__attribute__((builtin)) bool __operator__xor__(bool, bool);\n"
+    "__attribute__((builtin)) bool __operator__bitor__(bool, bool);\n"
+    "__attribute__((builtin)) bool __operator__eq__(bool, bool);\n"
+    "__attribute__((builtin)) bool __operator__ne__(bool, bool);\n"
+    "__attribute__((builtin)) bool __operator__not__(bool);\n"
+    "__attribute__((builtin)) bool __operator__compl__(bool);\n"
+    "__attribute__((always_inline, constructor)) bool __constructor__(bool b) { return b; }\n"
+    "__attribute__((always_inline, constructor)) bool __constructor__(int i) { return (bool)i; }\n"
+    "__attribute__((always_inline, constructor)) bool __constructor__(float f) { return (bool)f; }\n"
+    // Int functions ------------------------------------------------------------------------------
+    "__attribute__((builtin)) int __operator__add__(int, int);\n"
+    "__attribute__((builtin)) int __operator__sub__(int, int);\n"
+    "__attribute__((builtin)) int __operator__mul__(int, int);\n"
+    "__attribute__((builtin)) int __operator__mod__(int, int);\n"
+    "__attribute__((builtin)) int __operator__div__(int, int);\n"
+    "__attribute__((builtin)) int __operator__shl__(int, int);\n"
+    "__attribute__((builtin)) int __operator__shr__(int, int);\n"
+    "__attribute__((builtin)) int __operator__bitand__(int, int);\n"
+    "__attribute__((builtin)) int __operator__xor__(int, int);\n"
+    "__attribute__((builtin)) int __operator__bitor__(int, int);\n"
+    "__attribute__((builtin)) bool __operator__eq__(int, int);\n"
+    "__attribute__((builtin)) bool __operator__ne__(int, int);\n"
+    "__attribute__((builtin)) bool __operator__gt__(int, int);\n"
+    "__attribute__((builtin)) bool __operator__ge__(int, int);\n"
+    "__attribute__((builtin)) bool __operator__lt__(int, int);\n"
+    "__attribute__((builtin)) bool __operator__le__(int, int);\n"
+    "__attribute__((builtin)) int __operator__neg__(int);\n"
+    "__attribute__((builtin)) int __operator__not__(int);\n"
+    "__attribute__((builtin)) int __operator__compl__(int);\n"
+    "__attribute__((builtin)) int __operator__pre_inc__(output int);\n"
+    "__attribute__((builtin)) int __operator__pre_dec__(output int);\n"
+    "__attribute__((builtin)) int __operator__post_inc__(output int);\n"
+    "__attribute__((builtin)) int __operator__post_dec__(output int);\n"
+    "__attribute__((always_inline, constructor)) int __constructor__(bool b) { return (int)b; }\n"
+    "__attribute__((always_inline, constructor)) int __constructor__(int i) { return i; }\n"
+    "__attribute__((always_inline, constructor)) int __constructor__(float f) { return (int)f; }\n"
+    // Float functions ----------------------------------------------------------------------------
+    "__attribute__((builtin)) float __operator__add__(float, float);\n"
+    "__attribute__((builtin)) float __operator__sub__(float, float);\n"
+    "__attribute__((builtin)) float __operator__mul__(float, float);\n"
+    "__attribute__((builtin)) float __operator__div__(float, float);\n"
+    "__attribute__((builtin)) bool __operator__eq__(float, float);\n"
+    "__attribute__((builtin)) bool __operator__ne__(float, float);\n"
+    "__attribute__((builtin)) bool __operator__gt__(float, float);\n"
+    "__attribute__((builtin)) bool __operator__ge__(float, float);\n"
+    "__attribute__((builtin)) bool __operator__lt__(float, float);\n"
+    "__attribute__((builtin)) bool __operator__le__(float, float);\n"
+    "__attribute__((builtin)) float __operator__neg__(float);\n"
+    "__attribute__((builtin)) float __operator__pre_inc__(output float);\n"
+    "__attribute__((builtin)) float __operator__pre_dec__(output float);\n"
+    "__attribute__((builtin)) float __operator__post_inc__(output float);\n"
+    "__attribute__((builtin)) float __operator__post_dec__(output float);\n"
+    "__attribute__((always_inline, constructor)) float __constructor__(bool b) { return (float)b; }\n"
+    "__attribute__((always_inline, constructor)) float __constructor__(int i) { return (float)i; }\n"
+    "__attribute__((always_inline, constructor)) float __constructor__(float f) { return f; }\n"
+    // Color functions ----------------------------------------------------------------------------
+    "__attribute__((constructor, always_inline)) color __constructor__(float intensity) {\n"
+    "    return intensity;\n"
+    "}\n"
+    "__attribute__((constructor, always_inline)) color __constructor__(float r, float g, float b) {\n"
+    "    return { r, g, b };\n"
+    "}\n"
+    "__attribute__((constructor, always_inline)) color __constructor__(string space, float intensity) {\n"
+    "    return transformc(space, \"rgb\", color(intensity));\n"
+    "}\n"
+    "__attribute__((constructor, always_inline)) color __constructor__(string space, float r, float g, float b) {\n"
+    "    return transformc(space, \"rgb\", color(r, g, b));\n"
+    "}\n"
+    "__attribute__((builtin)) float luminance(color);"
+    "__attribute__((builtin)) color blackbody(float);\n"
+    "__attribute__((builtin)) color wavelength_color(float);\n"
+    "__attribute__((builtin)) color transformc(string, string, color);\n"
+    "__attribute__((builtin)) color transformc(string, color);\n"
+    "__attribute__((always_inline)) color __operator__add__(color a, color b) {\n"
+    "    return { a[0] + b[0], a[1] + b[1], a[2] + b[2] };\n"
+    "}\n"
+    "__attribute__((always_inline)) color __operator__sub__(color a, color b) {\n"
+    "    return { a[0] - b[0], a[1] - b[1], a[2] - b[2] };\n"
+    "}\n"
+    "__attribute__((always_inline)) color __operator__mul__(color a, color b) {\n"
+    "    return { a[0] * b[0], a[1] * b[1], a[2] * b[2] };\n"
+    "}\n"
+    "__attribute__((always_inline)) bool __operator__eq__(color a, color b) {\n"
+    "    return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];\n"
+    "}\n"
+    "__attribute__((always_inline)) bool __operator__ne__(color a, color b) {\n"
+    "    return !(a == b);\n"
+    "}\n"
+    "__attribute__((always_inline)) color __operator__neg__(color c) {\n"
+    "    return { -c[0], -c[1], -c[2] };\n"
+    "}\n"
+    // Matrix functions ---------------------------------------------------------------------------
+    "__attribute__((always_inline)) matrix __operator__add__(matrix a, matrix b) {\n"
+    "    return {\n"
+    "        a[0][0] + b[0][0], a[0][1] + b[0][1], a[0][2] + b[0][2], a[0][3] + b[0][3],\n"
+    "        a[1][0] + b[1][0], a[1][1] + b[1][1], a[1][2] + b[1][2], a[1][3] + b[1][3],\n"
+    "        a[2][0] + b[2][0], a[2][1] + b[2][1], a[2][2] + b[2][2], a[2][3] + b[2][3],\n"
+    "        a[3][0] + b[3][0], a[3][1] + b[3][1], a[3][2] + b[3][2], a[3][3] + b[3][3],\n"
+    "    };\n"
+    "}\n"
+    "__attribute__((builtin)) matrix __operator__sub__(matrix a, matrix b) {\n"
+    "    return {\n"
+    "        a[0][0] - b[0][0], a[0][1] - b[0][1], a[0][2] - b[0][2], a[0][3] - b[0][3],\n"
+    "        a[1][0] - b[1][0], a[1][1] - b[1][1], a[1][2] - b[1][2], a[1][3] - b[1][3],\n"
+    "        a[2][0] - b[2][0], a[2][1] - b[2][1], a[2][2] - b[2][2], a[2][3] - b[2][3],\n"
+    "        a[3][0] - b[3][0], a[3][1] - b[3][1], a[3][2] - b[3][2], a[3][3] - b[3][3],\n"
+    "    };\n"
+    "}\n"
+    "__attribute__((builtin)) matrix __operator__mul__(matrix a, matrix b) {\n"
+    "    return {\n"
+    "        a[0][0] * b[0][0] + a[0][1] * b[1][0] + a[0][2] * b[2][0] + a[0][3] * b[3][0],\n"
+    "        a[0][0] * b[0][1] + a[0][1] * b[1][1] + a[0][2] * b[2][1] + a[0][3] * b[3][1],\n"
+    "        a[0][0] * b[0][2] + a[0][1] * b[1][2] + a[0][2] * b[2][2] + a[0][3] * b[3][2],\n"
+    "        a[0][0] * b[0][3] + a[0][1] * b[1][3] + a[0][2] * b[2][3] + a[0][3] * b[3][3],\n"
+    "\n"
+    "        a[1][0] * b[0][0] + a[1][1] * b[1][0] + a[1][2] * b[2][0] + a[1][3] * b[3][0],\n"
+    "        a[1][0] * b[0][1] + a[1][1] * b[1][1] + a[1][2] * b[2][1] + a[1][3] * b[3][1],\n"
+    "        a[1][0] * b[0][2] + a[1][1] * b[1][2] + a[1][2] * b[2][2] + a[1][3] * b[3][2],\n"
+    "        a[1][0] * b[0][3] + a[1][1] * b[1][3] + a[1][2] * b[2][3] + a[1][3] * b[3][3],\n"
+    "\n"
+    "        a[2][0] * b[0][0] + a[2][1] * b[1][0] + a[2][2] * b[2][0] + a[2][3] * b[3][0],\n"
+    "        a[2][0] * b[0][1] + a[2][1] * b[1][1] + a[2][2] * b[2][1] + a[2][3] * b[3][1],\n"
+    "        a[2][0] * b[0][2] + a[2][1] * b[1][2] + a[2][2] * b[2][2] + a[2][3] * b[3][2],\n"
+    "        a[2][0] * b[0][3] + a[2][1] * b[1][3] + a[2][2] * b[2][3] + a[2][3] * b[3][3],\n"
+    "\n"
+    "        a[3][0] * b[0][0] + a[3][1] * b[1][0] + a[3][2] * b[2][0] + a[3][3] * b[3][0],\n"
+    "        a[3][0] * b[0][1] + a[3][1] * b[1][1] + a[3][2] * b[2][1] + a[3][3] * b[3][1],\n"
+    "        a[3][0] * b[0][2] + a[3][1] * b[1][2] + a[3][2] * b[2][2] + a[3][3] * b[3][2],\n"
+    "        a[3][0] * b[0][3] + a[3][1] * b[1][3] + a[3][2] * b[2][3] + a[3][3] * b[3][3],\n"
+    "    };\n"
+    "}\n"
+    "__attribute__((builtin)) matrix __operator__div__(matrix, matrix);\n" // TODO
+    "__attribute__((builtin)) int getmatrix(string, string, output matrix);\n"
+    "__attribute__((constructor, always_inline)) matrix __constructor__(float x) { return x; }\n"
+    "__attribute__((constructor, always_inline))\n"
+    "matrix __constructor__(float m00, float m01, float m02, float m03,\n"
+    "                       float m10, float m11, float m12, float m13,\n"
+    "                       float m20, float m21, float m22, float m23,\n"
+    "                       float m30, float m31, float m32, float m33)\n"
+    "{\n"
+    "    return { m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23, m30, m31, m32, m33 };\n"
+    "}\n"
+    "__attribute__((constructor, always_inline)) matrix __constructor__(string from, string to) {\n"
+    "    matrix result = 1;\n"
+    "    if (getmatrix(from, to, result) == 0)\n"
+    "        error(\"cannot construct matrix from space %s to %s\", from, to);\n"
+    "    return result;\n"
+    "}\n"
+    "__attribute__((constructor, always_inline)) matrix __constructor__(string space, float x) {\n"
+    "    return matrix(space, \"common\") * x;\n"
+    "}\n"
+    "__attribute__((constructor, always_inline))\n"
+    "matrix __constructor__(string space,\n"
+    "                       float m00, float m01, float m02, float m03,\n"
+    "                       float m10, float m11, float m12, float m13,\n"
+    "                       float m20, float m21, float m22, float m23,\n"
+    "                       float m30, float m31, float m32, float m33)\n"
+    "{\n"
+    "    return matrix(space, \"common\") * { m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23, m30, m31, m32, m33 };\n"
+    "}\n"
+    "__attribute__((builtin)) float determinant(matrix);\n" // TODO
+    "__attribute__((always_inline)) matrix transpose(matrix m) {\n"
+    "    return {\n"
+    "        m[0][0], m[1][0], m[2][0], m[3][0],\n"
+    "        m[0][1], m[1][1], m[2][1], m[3][1],\n"
+    "        m[0][2], m[1][2], m[2][2], m[3][2],\n"
+    "        m[0][3], m[1][3], m[2][3], m[3][3]\n"
+    "    };\n"
+    "}\n"
+    // Triple functions ---------------------------------------------------------------------------
+    "__attribute__((constructor, always_inline))\n"
+    "vector __constructor__(string space, float x, float y, float z) {\n"
+    "    return transform(matrix(space, \"common\"), vector(x, y, z));\n"
+    "}\n"
+    "__attribute__((constructor, always_inline))\n"
+    "point __constructor__(string space, float x, float y, float z) {\n"
+    "    return transform(matrix(space, \"common\"), point(x, y, z));\n"
+    "}\n"
+    // Fresnel function ---------------------------------------------------------------------------
+    "void fresnel(\n"
+    "    vector I,\n"
+    "    normal N,\n"
+    "    float eta,\n"
+    "    output float Kr,\n"
+    "    output float Kt,\n"
+    "    output vector R,\n"
+    "    output vector T)\n"
+    "{\n"
+    "    float c = dot(I, N);\n"
+    "    if (c < 0)\n"
+    "        c = -c;\n"
+    "    R = reflect(I, N);\n"
+    "    float g = 1.0 / (eta * eta) - 1.0 + c * c;\n"
+    "    if (g >= 0) {\n"
+    "        g = sqrt(g);\n"
+    "        float beta = g - c;\n"
+    "        float F = (c * (g + c) - 1.0) / (c * beta + 1.0);\n"
+    "        F = 0.5 * (1.0 + F * F);\n"
+    "        F *= beta * beta / ((g + c) * (g+c));\n"
+    "        Kr = F;\n"
+    "        Kt = (1.0 - F) * eta * eta;\n"
+    "        T = refract(I, N, eta);\n"
+    "    } else {\n"
+    "        Kr = 1.0;\n"
+    "        Kt = 0.0;\n"
+    "        T = 0;\n"
+    "    }\n"
+    "}\n"
+#define MATH_FUNCTIONS(type) \
+    "__attribute__((always_inline)) " type " radians(" type " x) { return x * (M_PI / 180.0); }\n" \
+    "__attribute__((always_inline)) " type " degrees(" type " x) { return x * (180.0 / M_PI); }\n" \
+    "__attribute__((builtin)) " type " cos(" type ");\n" \
+    "__attribute__((builtin)) " type " sin(" type ");\n" \
+    "__attribute__((builtin)) void sincos(" type ", output " type ", output " type ");\n" \
+    "__attribute__((builtin)) " type " tan(" type ");\n" \
+    "__attribute__((builtin)) " type " cosh(" type ");\n" \
+    "__attribute__((builtin)) " type " sinh(" type ");\n" \
+    "__attribute__((builtin)) " type " tanh(" type ");\n" \
+    "__attribute__((builtin)) " type " acos(" type ");\n" \
+    "__attribute__((builtin)) " type " asin(" type ");\n" \
+    "__attribute__((builtin)) " type " atan(" type ");\n" \
+    "__attribute__((builtin)) " type " atan2(" type ", " type ");\n" \
+    "__attribute__((builtin)) " type " pow(" type ", " type ");\n" \
+    "__attribute__((builtin)) " type " exp(" type ");\n" \
+    "__attribute__((builtin)) " type " exp2(" type ");\n" \
+    "__attribute__((builtin)) " type " expm1(" type ");\n" \
+    "__attribute__((builtin)) " type " log(" type ");\n" \
+    "__attribute__((builtin)) " type " log2(" type ");\n" \
+    "__attribute__((builtin)) " type " log10(" type ");\n" \
+    "__attribute__((builtin)) " type " logb(" type ");\n" \
+    "__attribute__((builtin)) " type " log(" type ", float);\n" \
+    "__attribute__((builtin)) " type " sqrt(" type ");\n" \
+    "__attribute__((builtin)) " type " inversesqrt(" type ");\n" \
+    "__attribute__((builtin)) " type " cbrt(" type ");\n" \
+    "__attribute__((builtin)) " type " abs(" type ");\n" \
+    "__attribute__((builtin)) " type " fabs(" type ");\n" \
+    "__attribute__((builtin)) " type " sign(" type ");\n" \
+    "__attribute__((builtin)) " type " floor(" type ");\n" \
+    "__attribute__((builtin)) " type " ceil(" type ");\n" \
+    "__attribute__((builtin)) " type " round(" type ");\n" \
+    "__attribute__((builtin)) " type " trunc(" type ");\n" \
+    "__attribute__((builtin)) " type " mod(" type ", " type ");\n" \
+    "__attribute__((builtin)) " type " fmod(" type ", " type ");\n" \
+    "__attribute__((builtin)) " type " min(" type ", " type ");\n" \
+    "__attribute__((builtin)) " type " max(" type ", " type ");\n" \
+    "__attribute__((builtin)) " type " clamp(" type ", " type ", " type ");\n" \
+    "__attribute__((builtin)) " type " mix(" type ", " type ", " type ");\n" \
+    "__attribute__((builtin)) " type " select(" type ", " type ", " type ");\n" \
+    "__attribute__((builtin)) " type " select(" type ", " type ", bool);\n"
+#define FLOAT_FUNCTIONS \
+    "__attribute__((always_inline)) float hypot(float x, float y) { return sqrt(x * x + y * y); }\n" \
+    "__attribute__((always_inline)) float hypot(float x, float y, float z) { return sqrt(x * x + y * y + z * z); }\n" \
+    "__attribute__((builtin)) bool isnan(float x);\n" \
+    "__attribute__((builtin)) bool isinf(float x);\n" \
+    "__attribute__((builtin)) bool isfinite(float x);\n" \
+    "__attribute__((builtin)) float erf(float x);\n" \
+    "__attribute__((builtin)) float erfc(float x);\n"
 
 static void register_geom_functions(struct builtins* builtins) {
     append_builtin(&builtins->geom_functions, make_binary_function(builtins, BUILTIN_DOT, PRIM_TYPE_FLOAT, PRIM_TYPE_VECTOR, PRIM_TYPE_VECTOR));

@@ -82,7 +82,7 @@ enum binary_expr_tag {
 enum ast_tag {
     AST_ERROR,
     AST_METADATUM,
-    AST_BUILTIN,
+    AST_ATTR,
 
     // Types
     AST_PRIM_TYPE,
@@ -137,14 +137,16 @@ struct ast {
     const struct type* type;
     struct file_loc loc;
     struct ast* next;
+    struct ast* attrs;
     union {
         bool bool_literal;
         int_literal int_literal;
         float_literal float_literal;
         const char* string_literal;
         struct {
-            enum builtin_tag tag;
-        } builtin;
+            const char* name;
+            struct ast* args;
+        } attr;
         struct {
             bool is_closure;
             enum prim_type_tag tag;
@@ -175,7 +177,8 @@ struct ast {
             struct ast* metadata;
         } shader_decl;
         struct {
-            bool is_output;
+            bool is_output : 1;
+            bool is_ellipsis : 1;
             struct ast* type;
             const char* name;
             struct ast* dim;
@@ -296,3 +299,4 @@ void ast_dump(const struct ast*);
 [[nodiscard]] size_t ast_field_count(const struct ast*);
 [[nodiscard]] const char* ast_decl_name(const struct ast*);
 [[nodiscard]] struct ast* ast_skip_parens(struct ast*);
+[[nodiscard]] struct ast* ast_find_attr(struct ast*, const char* name);

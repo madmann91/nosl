@@ -2,6 +2,7 @@
 
 #include <overture/str.h>
 #include <overture/log.h>
+#include <overture/vec.h>
 
 #include <stdint.h>
 #include <stddef.h>
@@ -40,7 +41,8 @@
     x(WHILE, "while",) \
     x(RETURN, "return",) \
     x(BREAK, "break",) \
-    x(CONTINUE, "continue",)
+    x(CONTINUE, "continue",) \
+    x(ATTRIBUTE, "__attribute__",)
 
 #define SYMBOL_LIST(x) \
     x(SEMICOLON, ";",) \
@@ -88,13 +90,15 @@
     x(OR_EQ, "|=",) \
     x(XOR_EQ, "^=",) \
     x(LSHIFT_EQ, "<<=",) \
-    x(RSHIFT_EQ, ">>=",)
+    x(RSHIFT_EQ, ">>=",) \
+    x(ELLIPSIS, "...",)
 
 #define TOKEN_LIST(x) \
     SYMBOL_LIST(x) \
     KEYWORD_LIST(x) \
-    x(IDENT, "<identifier>",) \
+    x(NL, "<new line>",) \
     x(EOF, "<end-of-file>",) \
+    x(IDENT, "<identifier>",) \
     x(ERROR, "<invalid token>",) \
     x(INT_LITERAL, "<integer literal>",) \
     x(FLOAT_LITERAL, "<floating-point literal>",) \
@@ -118,8 +122,10 @@ struct token {
     };
 };
 
+VEC_DECL(token_vec, struct token, PUBLIC)
+
 [[nodiscard]] const char* token_tag_to_string(enum token_tag);
 [[nodiscard]] bool token_tag_is_symbol(enum token_tag);
 [[nodiscard]] bool token_tag_is_keyword(enum token_tag);
 
-[[nodiscard]] struct str_view token_str_view(const char* data, const struct token*);
+[[nodiscard]] struct str_view token_view(const char* data, const struct token*);

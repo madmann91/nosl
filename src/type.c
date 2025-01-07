@@ -59,6 +59,9 @@ const char* shader_type_tag_to_string(enum shader_type_tag tag) {
 
 static enum coercion_rank type_coercion_rank_prim(const struct type* from, enum prim_type_tag to_tag) {
     if (from->tag == TYPE_PRIM) {
+        if (from->prim_type == to_tag)
+            return COERCION_EXACT;
+
         static const enum coercion_rank rank_matrix[PRIM_TYPE_COUNT][PRIM_TYPE_COUNT] = {
             [PRIM_TYPE_BOOL  ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
             [PRIM_TYPE_INT   ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,

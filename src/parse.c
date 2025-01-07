@@ -1,6 +1,6 @@
 #include "ast.h"
 #include "parse.h"
-#include "lexer.h"
+#include "preprocessor.h"
 
 #include <overture/log.h>
 #include <overture/str.h>
@@ -10,34 +10,38 @@
 #include <assert.h>
 #include <string.h>
 
-#define TOKEN_LOOKAHEAD 3
+#define TOKENS_AHEAD 3
+#define TOKENS_BEHIND 3
 
 struct parser {
-    struct lexer lexer;
-    struct token ahead[TOKEN_LOOKAHEAD];
-    struct source_pos prev_end;
+    struct token ahead[TOKENS_AHEAD];
+    struct token behind[TOKENS_BEHIND];
     struct mem_pool* mem_pool;
+    struct preprocessor* preprocessor;
+    struct log* log;
 };
 
 static struct ast* parse_type(struct parser*);
 static struct ast* parse_expr(struct parser*);
 static struct ast* parse_stmt(struct parser*);
 
-static inline void next_token(struct parser* parser) {
-    parser->prev_end = parser->ahead->loc.end;
-    for (size_t i = 1; i < TOKEN_LOOKAHEAD; ++i)
+static inline void read_token(struct parser* parser) {
+    for (size_t i = 1; i < TOKENS_BEHIND; ++i)
+        parser->behind[i] = parser->behind[i - 1];
+    parser->behind[0] = parser->ahead[0];
+    for (size_t i = 1; i < TOKENS_AHEAD; ++i)
         parser->ahead[i - 1] = parser->ahead[i];
-    parser->ahead[TOKEN_LOOKAHEAD - 1] = lexer_advance(&parser->lexer);
+    parser->ahead[TOKENS_AHEAD - 1] = preprocessor_advance(parser->preprocessor);
 }
 
 static inline void eat_token(struct parser* parser, [[maybe_unused]] enum token_tag tag) {
     assert(parser->ahead[0].tag == tag);
-    next_token(parser);
+    read_token(parser);
 }
 
 static inline bool accept_token(struct parser* parser, enum token_tag tag) {
     if (parser->ahead->tag == tag) {
-        next_token(parser);
+        read_token(parser);
         return true;
     }
     return false;
@@ -45,8 +49,8 @@ static inline bool accept_token(struct parser* parser, enum token_tag tag) {
 
 static inline bool expect_token(struct parser* parser, enum token_tag tag) {
     if (!accept_token(parser, tag)) {
-        struct str_view str_view = token_str_view(parser->lexer.data, parser->ahead);
-        log_error(parser->lexer.log,
+        struct str_view str_view = preprocessor_view(parser->preprocessor, parser->ahead);
+        log_error(parser->log,
             &parser->ahead->loc,
             "expected '%s', but got '%.*s'",
             token_tag_to_string(tag),
@@ -58,19 +62,33 @@ static inline bool expect_token(struct parser* parser, enum token_tag tag) {
 
 static inline struct ast* alloc_ast(
     struct parser* parser,
-    const struct source_pos* begin_pos,
+    const struct file_loc* begin_loc,
     const struct ast* ast)
 {
     struct ast* copy = MEM_POOL_ALLOC(*parser->mem_pool, struct ast);
     memcpy(copy, ast, sizeof(struct ast));
-    copy->loc.file_name = parser->lexer.file_name;
-    copy->loc.begin = *begin_pos;
-    copy->loc.end = parser->prev_end;
+
+    struct file_loc* end_loc = &parser->behind->loc;
+    const bool is_after = end_loc->end.row > begin_loc->begin.row ||
+        (end_loc->end.row == begin_loc->begin.row && end_loc->end.col >= begin_loc->begin.col);
+    const bool is_same_file = !strcmp(end_loc->file_name, begin_loc->file_name);
+
+    copy->loc.file_name = begin_loc->file_name;
+    copy->loc.begin = begin_loc->begin;
+    if (is_after && is_same_file) {
+        copy->loc.end = end_loc->end;
+    } else {
+        // Make sure the location shows up as one entire line from the first token, as this is the
+        // best we can do to assign a single location to an AST that spans multiple files or comes
+        // from macro expansion in various places.
+        copy->loc.end = begin_loc->end;
+        copy->loc.end.row++;
+    }
     return copy;
 }
 
 static const char* parse_ident(struct parser* parser) {
-    struct str_view str_view = token_str_view(parser->lexer.data, parser->ahead);
+    struct str_view str_view = preprocessor_view(parser->preprocessor, parser->ahead);
     char* name = mem_pool_alloc(parser->mem_pool, str_view.length + 1, alignof(char));
     xmemcpy(name, str_view.data, str_view.length);
     name[str_view.length] = 0;
@@ -97,80 +115,105 @@ static struct ast* parse_many(
 }
 
 static struct ast* parse_error(struct parser* parser, const char* msg) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
-    struct str_view str_view = token_str_view(parser->lexer.data, parser->ahead);
-    log_error(parser->lexer.log,
+    struct file_loc begin_loc = parser->ahead->loc;
+    struct str_view str_view = preprocessor_view(parser->preprocessor, parser->ahead);
+    log_error(parser->log,
         &parser->ahead->loc,
         "expected %s, but got '%.*s'",
         msg, (int)str_view.length, str_view.data);
-    next_token(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) { .tag = AST_ERROR });
+    read_token(parser);
+    return alloc_ast(parser, &begin_loc, &(struct ast) { .tag = AST_ERROR });
+}
+
+static struct ast* parse_attr(struct parser* parser) {
+    struct file_loc begin_loc = parser->ahead->loc;
+    const char* name = parse_ident(parser);
+    struct ast* args = NULL;
+    if (accept_token(parser, TOKEN_LPAREN))
+        args = parse_many(parser, TOKEN_RPAREN, TOKEN_COMMA, parse_expr);
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
+        .tag = AST_ATTR,
+        .attr = {
+            .name = name,
+            .args = args
+        }
+    });
+}
+
+static struct ast* parse_attr_list(struct parser* parser) {
+    if (!accept_token(parser, TOKEN_ATTRIBUTE))
+        return NULL;
+    expect_token(parser, TOKEN_LPAREN);
+    expect_token(parser, TOKEN_LPAREN);
+    struct ast* attrs = parse_many(parser, TOKEN_RPAREN, TOKEN_COMMA, parse_attr);
+    expect_token(parser, TOKEN_RPAREN);
+    return attrs;
 }
 
 static struct ast* parse_bool_literal(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     bool bool_literal = parser->ahead->tag == TOKEN_TRUE;
     eat_token(parser, bool_literal ? TOKEN_TRUE : TOKEN_FALSE);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_BOOL_LITERAL,
         .bool_literal = bool_literal
     });
 }
 
 static struct ast* parse_int_literal(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     int_literal int_literal = parser->ahead->int_literal;
     eat_token(parser, TOKEN_INT_LITERAL);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_INT_LITERAL,
         .int_literal = int_literal
     });
 }
 
 static struct ast* parse_float_literal(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     float_literal float_literal = parser->ahead->float_literal;
     eat_token(parser, TOKEN_FLOAT_LITERAL);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_FLOAT_LITERAL,
         .float_literal = float_literal
     });
 }
 
 static struct ast* parse_string_literal(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     struct str str = str_create();
     while (parser->ahead->tag == TOKEN_STRING_LITERAL) {
-        str_append(&str, str_view_shrink(token_str_view(parser->lexer.data, parser->ahead), 1, 1));
+        str_append(&str, str_view_shrink(preprocessor_view(parser->preprocessor, parser->ahead), 1, 1));
         eat_token(parser, TOKEN_STRING_LITERAL);
     }
     char* string_literal = mem_pool_alloc(parser->mem_pool, str.length + 1, alignof(char));
     xmemcpy(string_literal, str.data, str.length);
     string_literal[str.length] = 0;
     str_destroy(&str);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_STRING_LITERAL,
         .string_literal = string_literal
     });
 }
 
 static struct ast* parse_compound_init(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_LBRACE);
     struct ast* elems = parse_many(parser, TOKEN_RBRACE, TOKEN_COMMA, parse_expr);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_COMPOUND_INIT,
         .compound_expr.elems = elems
     });
 }
 
 static struct ast* parse_cast_expr(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_LPAREN);
     struct ast* type = parse_type(parser);
     expect_token(parser, TOKEN_RPAREN);
     struct ast* value = parse_expr(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_CAST_EXPR,
         .cast_expr = {
             .type = type,
@@ -189,18 +232,18 @@ static struct ast* parse_compound_expr(struct parser* parser) {
         prev->next = parse_expr(parser);
         prev = prev->next;
     }
-    return alloc_ast(parser, &first->loc.begin, &(struct ast) {
+    return alloc_ast(parser, &first->loc, &(struct ast) {
         .tag = AST_COMPOUND_EXPR,
         .compound_expr.elems = first
     });
 }
 
 static struct ast* parse_paren_expr(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_LPAREN);
     struct ast* inner_expr = parse_compound_expr(parser);
     expect_token(parser, TOKEN_RPAREN);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_PAREN_EXPR,
         .paren_expr.inner_expr = inner_expr
     });
@@ -220,20 +263,20 @@ static struct ast* parse_cast_or_paren_expr(struct parser* parser) {
 }
 
 static struct ast* parse_ident_expr(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     const char* name = parse_ident(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_IDENT_EXPR,
         .ident_expr.name = name
     });
 }
 
 static struct ast* parse_construct_expr(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     struct ast* type = parse_type(parser);
     expect_token(parser, TOKEN_LPAREN);
     struct ast* args = parse_many(parser, TOKEN_RPAREN, TOKEN_COMMA, parse_expr);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_CONSTRUCT_EXPR,
         .construct_expr = {
             .type = type,
@@ -262,7 +305,7 @@ static struct ast* parse_primary_expr(struct parser* parser) {
 }
 
 static struct ast* parse_pre_unary_expr(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     enum unary_expr_tag tag = UNARY_EXPR_NOT;
     switch (parser->ahead->tag) {
         case TOKEN_NOT: tag = UNARY_EXPR_NOT;     break;
@@ -273,9 +316,9 @@ static struct ast* parse_pre_unary_expr(struct parser* parser) {
             assert(false && "invalid prefix unary operation");
             break;
     }
-    next_token(parser);
+    read_token(parser);
     struct ast* arg = parse_expr(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_UNARY_EXPR,
         .unary_expr = {
             .tag = tag,
@@ -300,7 +343,7 @@ static struct ast* parse_prefix_expr(struct parser* parser) {
 static struct ast* parse_proj_expr(struct parser* parser, struct ast* value) {
     eat_token(parser, TOKEN_DOT);
     const char* elem = parse_ident(parser);
-    return alloc_ast(parser, &value->loc.begin, &(struct ast) {
+    return alloc_ast(parser, &value->loc, &(struct ast) {
         .tag = AST_PROJ_EXPR,
         .proj_expr = {
             .value = value,
@@ -313,7 +356,7 @@ static struct ast* parse_index_expr(struct parser* parser, struct ast* value) {
     eat_token(parser, TOKEN_LBRACKET);
     struct ast* index = parse_expr(parser);
     expect_token(parser, TOKEN_RBRACKET);
-    return alloc_ast(parser, &value->loc.begin, &(struct ast) {
+    return alloc_ast(parser, &value->loc, &(struct ast) {
         .tag = AST_INDEX_EXPR,
         .index_expr = {
             .value = value,
@@ -325,8 +368,8 @@ static struct ast* parse_index_expr(struct parser* parser, struct ast* value) {
 static struct ast* parse_post_inc_or_dec_expr(struct parser* parser, struct ast* arg) {
     enum unary_expr_tag tag = parser->ahead->tag == TOKEN_INC
         ? UNARY_EXPR_POST_INC : UNARY_EXPR_POST_DEC;
-    next_token(parser);
-    return alloc_ast(parser, &arg->loc.begin, &(struct ast) {
+    read_token(parser);
+    return alloc_ast(parser, &arg->loc, &(struct ast) {
         .tag = AST_UNARY_EXPR,
         .unary_expr = {
             .tag = tag,
@@ -338,7 +381,7 @@ static struct ast* parse_post_inc_or_dec_expr(struct parser* parser, struct ast*
 static struct ast* parse_call_expr(struct parser* parser, struct ast* callee) {
     eat_token(parser, TOKEN_LPAREN);
     struct ast* args = parse_many(parser, TOKEN_RPAREN, TOKEN_COMMA, parse_expr);
-    return alloc_ast(parser, &callee->loc.begin, &(struct ast) {
+    return alloc_ast(parser, &callee->loc, &(struct ast) {
         .tag = AST_CALL_EXPR,
         .call_expr = {
             .callee = callee,
@@ -381,9 +424,9 @@ static struct ast* parse_binary_expr(struct parser* parser, struct ast* left, in
         } else if (next_prec > prec) {
             return left;
         } else {
-            next_token(parser);
+            read_token(parser);
             left->next = parse_binary_expr(parser, parse_suffix_expr(parser), prec - 1);
-            left = alloc_ast(parser, &left->loc.begin, &(struct ast) {
+            left = alloc_ast(parser, &left->loc, &(struct ast) {
                 .tag = AST_BINARY_EXPR,
                 .binary_expr = {
                     .tag = tag,
@@ -415,7 +458,7 @@ static struct ast* parse_ternary_expr(struct parser* parser) {
     struct ast* then_expr = parse_expr(parser);
     expect_token(parser, TOKEN_COLON);
     struct ast* else_expr = parse_expr(parser);
-    return alloc_ast(parser, &cond->loc.begin, &(struct ast) {
+    return alloc_ast(parser, &cond->loc, &(struct ast) {
         .tag = AST_TERNARY_EXPR,
         .ternary_expr = {
             .cond = cond,
@@ -437,9 +480,9 @@ static struct ast* parse_assign_expr(struct parser* parser) {
             return left;
     }
 
-    next_token(parser);
+    read_token(parser);
     left->next = parse_assign_expr(parser);
-    return alloc_ast(parser, &left->loc.begin, &(struct ast) {
+    return alloc_ast(parser, &left->loc, &(struct ast) {
         .tag = AST_BINARY_EXPR,
         .binary_expr = {
             .tag = tag,
@@ -453,7 +496,7 @@ static struct ast* parse_expr(struct parser* parser) {
 }
 
 static struct ast* parse_prim_type(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     bool is_closure = accept_token(parser, TOKEN_CLOSURE);
     enum prim_type_tag tag = PRIM_TYPE_VOID;
     switch (parser->ahead->tag) {
@@ -464,8 +507,8 @@ static struct ast* parse_prim_type(struct parser* parser) {
             assert(false && "invalid prim type tag");
             break;
     }
-    next_token(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    read_token(parser);
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_PRIM_TYPE,
         .prim_type = {
             .is_closure = is_closure,
@@ -475,7 +518,7 @@ static struct ast* parse_prim_type(struct parser* parser) {
 }
 
 static struct ast* parse_shader_type(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     enum shader_type_tag tag = SHADER_TYPE_SHADER;
     switch (parser->ahead->tag) {
 #define x(name, ...) case TOKEN_##name: tag = SHADER_TYPE_##name; break;
@@ -485,17 +528,17 @@ static struct ast* parse_shader_type(struct parser* parser) {
             assert(false && "invalid prim type tag");
             break;
     }
-    next_token(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    read_token(parser);
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_SHADER_TYPE,
         .shader_type.tag = tag
     });
 }
 
 static struct ast* parse_named_type(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     const char* name = parse_ident(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_NAMED_TYPE,
         .named_type.name = name
     });
@@ -516,7 +559,7 @@ static struct ast* parse_type(struct parser* parser) {
 }
 
 static struct ast* parse_unsized_dim(struct parser* parser) {
-    return alloc_ast(parser, &parser->prev_end, &(struct ast) { .tag = AST_UNSIZED_DIM });
+    return alloc_ast(parser, &parser->behind->loc, &(struct ast) { .tag = AST_UNSIZED_DIM });
 }
 
 static struct ast* parse_array_dim(struct parser* parser) {
@@ -531,12 +574,12 @@ static struct ast* parse_array_dim(struct parser* parser) {
 }
 
 static struct ast* parse_metadatum(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     struct ast* type = parse_type(parser);
     const char* name = parse_ident(parser);
     expect_token(parser, TOKEN_EQ);
     struct ast* init = parse_expr(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_METADATUM,
         .metadatum = {
             .type = type,
@@ -555,16 +598,27 @@ static struct ast* parse_metadata(struct parser* parser) {
 static void parse_ignored_metadata(struct parser* parser) {
     struct file_loc loc = parser->ahead->loc;
     struct ast* metadata = parse_metadata(parser);
-    loc.end = parser->prev_end;
+    loc.end = parser->behind->loc.end;
     if (metadata)
-        log_warn(parser->lexer.log, &loc, "shader metadata is not allowed here");
+        log_warn(parser->log, &loc, "shader metadata is not allowed here");
+}
+
+static struct ast* parse_ellipsis(struct parser* parser) {
+    struct file_loc begin_loc = parser->ahead->loc;
+    eat_token(parser, TOKEN_ELLIPSIS);
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
+        .tag = AST_PARAM,
+        .param.is_ellipsis = true
+    });
 }
 
 static struct ast* parse_param(struct parser* parser, bool is_shader_param) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     bool is_output = accept_token(parser, TOKEN_OUTPUT);
     struct ast* type = parse_type(parser);
-    const char* name = parse_ident(parser);
+    const char* name = NULL;
+    if (is_shader_param || parser->ahead->tag == TOKEN_IDENT)
+        name = parse_ident(parser);
     struct ast* dim = parse_array_dim(parser);
     struct ast* init = NULL;
     struct ast* metadata = NULL;
@@ -573,10 +627,11 @@ static struct ast* parse_param(struct parser* parser, bool is_shader_param) {
         init = parse_expr(parser);
         metadata = parse_metadata(parser);
     }
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_PARAM,
         .param = {
             .is_output = is_output,
+            .is_ellipsis = false,
             .name = name,
             .type = type,
             .dim = dim,
@@ -587,6 +642,8 @@ static struct ast* parse_param(struct parser* parser, bool is_shader_param) {
 }
 
 static struct ast* parse_func_param(struct parser* parser) {
+    if (parser->ahead->tag == TOKEN_ELLIPSIS)
+        return parse_ellipsis(parser);
     return parse_param(parser, false);
 }
 
@@ -595,7 +652,7 @@ static struct ast* parse_shader_param(struct parser* parser) {
 }
 
 static struct ast* parse_if_stmt(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_IF);
     expect_token(parser, TOKEN_LPAREN);
     struct ast* cond = parse_compound_expr(parser);
@@ -604,7 +661,7 @@ static struct ast* parse_if_stmt(struct parser* parser) {
     struct ast* else_stmt = NULL;
     if (accept_token(parser, TOKEN_ELSE))
         else_stmt = parse_stmt(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_IF_STMT,
         .if_stmt = {
             .cond = cond,
@@ -615,41 +672,41 @@ static struct ast* parse_if_stmt(struct parser* parser) {
 }
 
 static struct ast* parse_break_stmt(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_BREAK);
     expect_token(parser, TOKEN_SEMICOLON);
-    return alloc_ast(parser, &begin_pos, &(struct ast) { .tag = AST_BREAK_STMT });
+    return alloc_ast(parser, &begin_loc, &(struct ast) { .tag = AST_BREAK_STMT });
 }
 
 static struct ast* parse_continue_stmt(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_CONTINUE);
     expect_token(parser, TOKEN_SEMICOLON);
-    return alloc_ast(parser, &begin_pos, &(struct ast) { .tag = AST_CONTINUE_STMT });
+    return alloc_ast(parser, &begin_loc, &(struct ast) { .tag = AST_CONTINUE_STMT });
 }
 
 static struct ast* parse_return_stmt(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_RETURN);
     struct ast* value = NULL;
     if (!accept_token(parser, TOKEN_SEMICOLON)) {
         value = parse_expr(parser);
         expect_token(parser, TOKEN_SEMICOLON);
     }
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_RETURN_STMT,
         .return_stmt.value = value
     });
 }
 
 static struct ast* parse_while_loop(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_WHILE);
     expect_token(parser, TOKEN_LPAREN);
     struct ast* cond = parse_compound_expr(parser);
     expect_token(parser, TOKEN_RPAREN);
     struct ast* body = parse_stmt(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_WHILE_LOOP,
         .while_loop = {
             .cond = cond,
@@ -659,7 +716,7 @@ static struct ast* parse_while_loop(struct parser* parser) {
 }
 
 static struct ast* parse_do_while_loop(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_DO);
     struct ast* body = parse_stmt(parser);
     expect_token(parser, TOKEN_WHILE);
@@ -667,7 +724,7 @@ static struct ast* parse_do_while_loop(struct parser* parser) {
     struct ast* cond = parse_compound_expr(parser);
     expect_token(parser, TOKEN_RPAREN);
     expect_token(parser, TOKEN_SEMICOLON);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_DO_WHILE_LOOP,
         .while_loop = {
             .cond = cond,
@@ -677,13 +734,13 @@ static struct ast* parse_do_while_loop(struct parser* parser) {
 }
 
 static struct ast* parse_var(struct parser* parser, bool with_init) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     const char* name = parse_ident(parser);
     struct ast* dim = parse_array_dim(parser);
     struct ast* init = NULL;
     if (with_init && accept_token(parser, TOKEN_EQ))
         init = parse_expr(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_VAR,
         .var = {
             .name = name,
@@ -704,7 +761,7 @@ static struct ast* parse_var_without_init(struct parser* parser) {
 static struct ast* parse_var_decl(struct parser* parser, struct ast* type, bool with_init) {
     struct ast* vars = parse_many(parser, TOKEN_SEMICOLON, TOKEN_COMMA,
         with_init ? parse_var_with_init : parse_var_without_init);
-    return alloc_ast(parser, &type->loc.begin, &(struct ast) {
+    return alloc_ast(parser, &type->loc, &(struct ast) {
         .tag = AST_VAR_DECL,
         .var_decl = {
             .type = type,
@@ -714,10 +771,10 @@ static struct ast* parse_var_decl(struct parser* parser, struct ast* type, bool 
 }
 
 static struct ast* parse_block(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_LBRACE);
     struct ast* stmts = parse_many(parser, TOKEN_RBRACE, TOKEN_ERROR, parse_stmt);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_BLOCK,
         .block.stmts = stmts
     });
@@ -734,8 +791,12 @@ static struct ast* parse_func_decl(struct parser* parser, struct ast* ret_type) 
     parse_ignored_metadata(parser);
     expect_token(parser, TOKEN_LPAREN);
     struct ast* params = parse_many(parser, TOKEN_RPAREN, TOKEN_COMMA, parse_func_param);
-    struct ast* body = parse_block_or_error(parser);
-    return alloc_ast(parser, &ret_type->loc.begin, &(struct ast) {
+
+    struct ast* body = NULL;
+    if (!accept_token(parser, TOKEN_SEMICOLON))
+        body = parse_block_or_error(parser);
+
+    return alloc_ast(parser, &ret_type->loc, &(struct ast) {
         .tag = AST_FUNC_DECL,
         .func_decl = {
             .ret_type = ret_type,
@@ -767,7 +828,7 @@ static struct ast* parse_for_init(struct parser* parser) {
 }
 
 static struct ast* parse_for_loop(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_FOR);
     expect_token(parser, TOKEN_LPAREN);
     struct ast* init = parse_for_init(parser);
@@ -782,7 +843,7 @@ static struct ast* parse_for_loop(struct parser* parser) {
         expect_token(parser, TOKEN_RPAREN);
     }
     struct ast* body = parse_stmt(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_FOR_LOOP,
         .for_loop = {
             .init = init,
@@ -793,7 +854,7 @@ static struct ast* parse_for_loop(struct parser* parser) {
     });
 }
 
-static struct ast* parse_local_decl(struct parser* parser) {
+static struct ast* parse_var_or_func_decl(struct parser* parser) {
     struct ast* type = parse_type(parser);
     if (parser->ahead[0].tag == TOKEN_IDENT &&
         parser->ahead[1].tag == TOKEN_LPAREN)
@@ -802,9 +863,9 @@ static struct ast* parse_local_decl(struct parser* parser) {
 }
 
 static struct ast* parse_empty_stmt(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_SEMICOLON);
-    return alloc_ast(parser, &begin_pos, &(struct ast) { .tag = AST_EMPTY_STMT });
+    return alloc_ast(parser, &begin_loc, &(struct ast) { .tag = AST_EMPTY_STMT });
 }
 
 static struct ast* parse_stmt(struct parser* parser) {
@@ -813,7 +874,7 @@ static struct ast* parse_stmt(struct parser* parser) {
         PRIM_TYPE_LIST(x)
 #undef x
         case TOKEN_CLOSURE:
-            return parse_local_decl(parser);
+            return parse_var_or_func_decl(parser);
         case TOKEN_IF:
             return parse_if_stmt(parser);
         case TOKEN_BREAK:
@@ -832,7 +893,7 @@ static struct ast* parse_stmt(struct parser* parser) {
             return parse_block(parser);
         case TOKEN_IDENT:
             if (parser->ahead[1].tag == TOKEN_IDENT)
-                return parse_local_decl(parser);
+                return parse_var_or_func_decl(parser);
             [[fallthrough]];
         case TOKEN_INC:
         case TOKEN_DEC:
@@ -856,14 +917,14 @@ static struct ast* parse_stmt(struct parser* parser) {
 }
 
 static struct ast* parse_shader_decl(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     struct ast* type = parse_shader_type(parser);
     const char* name = parse_ident(parser);
     struct ast* metadata = parse_metadata(parser);
     expect_token(parser, TOKEN_LPAREN);
     struct ast* params = parse_many(parser, TOKEN_RPAREN, TOKEN_COMMA, parse_shader_param);
     struct ast* body = parse_block_or_error(parser);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_SHADER_DECL,
         .shader_decl = {
             .type = type,
@@ -880,13 +941,13 @@ static struct ast* parse_field_decl(struct parser* parser) {
 }
 
 static struct ast* parse_struct_decl(struct parser* parser) {
-    struct source_pos begin_pos = parser->ahead->loc.begin;
+    struct file_loc begin_loc = parser->ahead->loc;
     eat_token(parser, TOKEN_STRUCT);
     const char* name = parse_ident(parser);
     expect_token(parser, TOKEN_LBRACE);
     struct ast* fields = parse_many(parser, TOKEN_RBRACE, TOKEN_ERROR, parse_field_decl);
     expect_token(parser, TOKEN_SEMICOLON);
-    return alloc_ast(parser, &begin_pos, &(struct ast) {
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_STRUCT_DECL,
         .struct_decl = {
             .name = name,
@@ -908,18 +969,30 @@ static struct ast* parse_top_level_decl(struct parser* parser) {
 #undef x
         case TOKEN_CLOSURE:
         case TOKEN_IDENT:
-            return parse_func_decl(parser, parse_type(parser));
+            return parse_var_or_func_decl(parser);
         default:
             return parse_error(parser, "top-level declaration");
     }
 }
 
-struct ast* parse(struct mem_pool* mem_pool, const char* file_name, const char* data, size_t size, struct log* log) {
+static struct ast* parse_top_level_decl_with_attrs(struct parser* parser) {
+    struct ast* attrs = parse_attr_list(parser);
+    struct ast* decl = parse_top_level_decl(parser);
+    decl->attrs = attrs;
+    return decl;
+}
+
+struct ast* parse(
+    struct mem_pool* mem_pool,
+    struct preprocessor* preprocessor,
+    struct log* log)
+{
     struct parser parser = {
         .mem_pool = mem_pool,
-        .lexer = lexer_create(file_name, data, size, log)
+        .preprocessor = preprocessor,
+        .log = log
     };
-    for (size_t i = 0; i < TOKEN_LOOKAHEAD; ++i)
-        next_token(&parser);
-    return parse_many(&parser, TOKEN_EOF, TOKEN_ERROR, parse_top_level_decl);
+    for (size_t i = 0; i < TOKENS_AHEAD; ++i)
+        read_token(&parser);
+    return parse_many(&parser, TOKEN_EOF, TOKEN_ERROR, parse_top_level_decl_with_attrs);
 }

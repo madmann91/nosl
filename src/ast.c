@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <assert.h>
+#include <string.h>
 
 struct styles {
     const char* reset;
@@ -90,17 +91,6 @@ const char* unary_expr_tag_to_func_name(enum unary_expr_tag tag) {
         case UNARY_EXPR_NOT:      return "__operator__not__";
         default:
             assert(false && "invalid unary expression");
-            return "";
-    }
-}
-
-const char* builtin_tag_to_string(enum builtin_tag tag) {
-    switch (tag) {
-#define x(name, str) case BUILTIN_##name: return str;
-        BUILTIN_LIST(x)
-#undef x
-        default:
-            assert(false && "invalid builtin");
             return "";
     }
 }
@@ -232,12 +222,19 @@ static void print(
     const struct ast* ast,
     const struct styles* styles)
 {
+    if (ast->attrs) {
+        fprintf(file, "%s__attribute__%s", styles->keyword, styles->reset);
+        print_many(file, indent, "((", ", ", ")) ", ast->attrs, styles);
+    }
+
     switch (ast->tag) {
         case AST_ERROR:
             fprintf(file, "%s<error>%s", styles->error, styles->reset);
             break;
-        case AST_BUILTIN:
-            fprintf(file, "%s<builtin %s>%s", styles->error, builtin_tag_to_string(ast->builtin.tag), styles->reset);
+        case AST_ATTR:
+            fputs(ast->attr.name, file);
+            if (ast->attr.args)
+                print_many(file, indent, "(", ", ", ")", ast->attr.args, styles);
             break;
         case AST_METADATUM:
             print(file, indent, ast->metadatum.type, styles);
@@ -280,8 +277,13 @@ static void print(
         case AST_FUNC_DECL:
             print(file, indent, ast->func_decl.ret_type, styles);
             fprintf(file, " %s", ast->func_decl.name);
-            print_many(file, indent, "(", ", ", ") ", ast->func_decl.params, styles);
-            print(file, indent, ast->func_decl.body, styles);
+            print_many(file, indent, "(", ", ", ")", ast->func_decl.params, styles);
+            if (ast->func_decl.body) {
+                fputc(' ', file);
+                print(file, indent, ast->func_decl.body, styles);
+            } else {
+                fputc(';', file);
+            }
             break;
         case AST_STRUCT_DECL:
             fprintf(file, "%sstruct%s %s {", styles->keyword, styles->reset, ast->struct_decl.name);
@@ -306,10 +308,15 @@ static void print(
             }
             break;
         case AST_PARAM:
+            if (ast->param.is_ellipsis) {
+                fputs("...", file);
+                break;
+            }
             if (ast->param.is_output)
                 fprintf(file, "%soutput%s ", styles->keyword, styles->reset);
             print(file, indent, ast->param.type, styles);
-            fprintf(file, " %s", ast->param.name);
+            if (ast->param.name)
+                fprintf(file, " %s", ast->param.name);
             print_dim(file, indent, ast->param.dim, styles);
             if (ast->param.init) {
                 fputs(" = ", file);
@@ -517,4 +524,12 @@ struct ast* ast_skip_parens(struct ast* ast) {
     while (ast->tag == AST_PAREN_EXPR)
         ast = ast->paren_expr.inner_expr;
     return ast;
+}
+
+struct ast* ast_find_attr(struct ast* ast, const char* name) {
+    for (struct ast* attr = ast->attrs; attr; attr = attr->next) {
+        if (!strcmp(name, attr->attr.name))
+            return attr;
+    }
+    return NULL;
 }

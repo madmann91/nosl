@@ -1,6 +1,7 @@
 #include "parse.h"
 #include "check.h"
 #include "type_table.h"
+#include "preprocessor.h"
 #include "ast.h"
 #include "builtins.h"
 
@@ -39,13 +40,6 @@ static bool compile_file(
     const struct builtins* builtins,
     const struct options* options)
 {
-    size_t file_size = 0;
-    char* file_data = file_read(file_name, &file_size);
-    if (!file_data) {
-        fprintf(stderr, "cannot open '%s'\n", file_name);
-        return false;
-    }
-
     struct log log = {
         .file = stderr,
         .disable_colors = options->disable_colors || !is_term(stderr),
@@ -54,11 +48,21 @@ static bool compile_file(
         .print_line = log_print_line
     };
 
+    struct preprocessor* preprocessor = preprocessor_create(&log, &(struct preprocessor_config) {
+        .include_paths = NULL,
+        .include_path_count = 0
+    });
+
     struct mem_pool mem_pool = mem_pool_create();
 
     bool status = true;
 
-    struct ast* program = parse(&mem_pool, file_name, file_data, file_size, &log);
+    if (!preprocessor_include(preprocessor, file_name)) {
+        log_error(&log, NULL, "cannot open '%s'\n", file_name);
+        goto error;
+    }
+
+    struct ast* program = parse(&mem_pool, preprocessor, &log);
     if (log.error_count != 0)
         goto error;
 
@@ -75,8 +79,8 @@ static bool compile_file(
 error:
     status = false;
 done:
+    preprocessor_destroy(preprocessor);
     mem_pool_destroy(&mem_pool);
-    free(file_data);
     return status;
 }
 

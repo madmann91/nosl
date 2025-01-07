@@ -6,9 +6,9 @@
 #include <ctype.h>
 #include <inttypes.h>
 
-struct lexer lexer_create(const char* file_name, const char* data, size_t size, struct log* log) {
+struct lexer lexer_create(const char* file_name, const char* file_data, size_t size, struct log* log) {
     return (struct lexer) {
-        .data = data,
+        .file_data = file_data,
         .bytes_left = size,
         .source_pos = { .row = 1, .col = 1, .bytes = 0 },
         .file_name = file_name,
@@ -20,9 +20,13 @@ static inline bool is_eof(const struct lexer* lexer) {
     return lexer->bytes_left == 0;
 }
 
+static inline char next_char(const struct lexer* lexer, size_t i) {
+    assert(i < lexer->bytes_left);
+    return lexer->file_data[lexer->source_pos.bytes + i];
+}
+
 static inline char cur_char(const struct lexer* lexer) {
-    assert(!is_eof(lexer));
-    return lexer->data[lexer->source_pos.bytes];
+    return next_char(lexer, 0);
 }
 
 static inline void eat_char(struct lexer* lexer) {
@@ -46,7 +50,7 @@ static inline bool accept_char(struct lexer* lexer, char c) {
 }
 
 static inline void eat_spaces(struct lexer* lexer) {
-    while (!is_eof(lexer) && isspace(cur_char(lexer)))
+    while (!is_eof(lexer) && isspace(cur_char(lexer)) && cur_char(lexer) != '\n')
         eat_char(lexer);
 }
 
@@ -113,9 +117,9 @@ static inline struct token parse_literal(struct lexer* lexer) {
     bool is_float = has_exp || has_dot;
     struct token token = make_token(lexer, &begin_pos, is_float ? TOKEN_FLOAT_LITERAL : TOKEN_INT_LITERAL);
     if (is_float)
-        token.float_literal = strtod(token_str_view(lexer->data, &token).data, NULL);
+        token.float_literal = strtod(token_view(lexer->file_data, &token).data, NULL);
     else
-        token.int_literal = strtoumax(token_str_view(lexer->data, &token).data + prefix_len, NULL, base);
+        token.int_literal = strtoumax(token_view(lexer->file_data, &token).data + prefix_len, NULL, base);
     return token;
 }
 
@@ -137,19 +141,25 @@ struct token lexer_advance(struct lexer* lexer) {
         if (is_eof(lexer))
             return make_token(lexer, &begin_pos, TOKEN_EOF);
 
-        if (accept_char(lexer, '(')) return make_token(lexer, &begin_pos, TOKEN_LPAREN);
-        if (accept_char(lexer, ')')) return make_token(lexer, &begin_pos, TOKEN_RPAREN);
-        if (accept_char(lexer, '{')) return make_token(lexer, &begin_pos, TOKEN_LBRACE);
-        if (accept_char(lexer, '}')) return make_token(lexer, &begin_pos, TOKEN_RBRACE);
-        if (accept_char(lexer, ';')) return make_token(lexer, &begin_pos, TOKEN_SEMICOLON);
-        if (accept_char(lexer, ',')) return make_token(lexer, &begin_pos, TOKEN_COMMA);
-        if (accept_char(lexer, '~')) return make_token(lexer, &begin_pos, TOKEN_TILDE);
-        if (accept_char(lexer, '?')) return make_token(lexer, &begin_pos, TOKEN_QUESTION);
-        if (accept_char(lexer, ':')) return make_token(lexer, &begin_pos, TOKEN_COLON);
+        if (accept_char(lexer, '\n')) return make_token(lexer, &begin_pos, TOKEN_NL);
+        if (accept_char(lexer, '(' )) return make_token(lexer, &begin_pos, TOKEN_LPAREN);
+        if (accept_char(lexer, ')' )) return make_token(lexer, &begin_pos, TOKEN_RPAREN);
+        if (accept_char(lexer, '{' )) return make_token(lexer, &begin_pos, TOKEN_LBRACE);
+        if (accept_char(lexer, '}' )) return make_token(lexer, &begin_pos, TOKEN_RBRACE);
+        if (accept_char(lexer, ';' )) return make_token(lexer, &begin_pos, TOKEN_SEMICOLON);
+        if (accept_char(lexer, ',' )) return make_token(lexer, &begin_pos, TOKEN_COMMA);
+        if (accept_char(lexer, '~' )) return make_token(lexer, &begin_pos, TOKEN_TILDE);
+        if (accept_char(lexer, '?' )) return make_token(lexer, &begin_pos, TOKEN_QUESTION);
+        if (accept_char(lexer, ':' )) return make_token(lexer, &begin_pos, TOKEN_COLON);
 
         if (accept_char(lexer, '.')) {
             if (isdigit(cur_char(lexer)))
                 return parse_literal(lexer);
+            if (lexer->bytes_left >= 2 && cur_char(lexer) == '.' && next_char(lexer, 1) == '.') {
+                eat_char(lexer);
+                eat_char(lexer);
+                return make_token(lexer, &begin_pos, TOKEN_ELLIPSIS);
+            }
             return make_token(lexer, &begin_pos, TOKEN_DOT);
         }
 
@@ -304,7 +314,7 @@ struct token lexer_advance(struct lexer* lexer) {
             while (!is_eof(lexer) && (isalnum(cur_char(lexer)) || cur_char(lexer) == '_'))
                 eat_char(lexer);
             struct token token = make_token(lexer, &begin_pos, TOKEN_IDENT);
-            enum token_tag keyword_tag = find_keyword(token_str_view(lexer->data, &token));
+            enum token_tag keyword_tag = find_keyword(token_view(lexer->file_data, &token));
             if (keyword_tag != TOKEN_ERROR)
                 token.tag = keyword_tag;
             return token;
@@ -312,7 +322,7 @@ struct token lexer_advance(struct lexer* lexer) {
 
         eat_char(lexer);
         struct token error_token = make_token(lexer, &begin_pos, TOKEN_ERROR);
-        struct str_view error_str = token_str_view(lexer->data, &error_token);
+        struct str_view error_str = token_view(lexer->file_data, &error_token);
         log_error(lexer->log,
             &error_token.loc,
             "invalid token '%.*s'", (int)error_str.length, error_str.data);
