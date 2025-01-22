@@ -81,8 +81,8 @@ static inline struct ast* alloc_ast(
         // Make sure the location shows up as one entire line from the first token, as this is the
         // best we can do to assign a single location to an AST that spans multiple files or comes
         // from macro expansion in various places.
-        copy->loc.end = begin_loc->end;
-        copy->loc.end.row++;
+        copy->loc.end.row = begin_loc->end.row + 1;
+        copy->loc.end.col = 1;
     }
     return copy;
 }
@@ -558,14 +558,15 @@ static struct ast* parse_type(struct parser* parser) {
     }
 }
 
-static struct ast* parse_unsized_dim(struct parser* parser) {
-    return alloc_ast(parser, &parser->behind->loc, &(struct ast) { .tag = AST_UNSIZED_DIM });
+static struct ast* parse_unsized_dim(struct parser* parser, const struct file_loc* begin_loc) {
+    return alloc_ast(parser, begin_loc, &(struct ast) { .tag = AST_UNSIZED_DIM });
 }
 
 static struct ast* parse_array_dim(struct parser* parser) {
+    struct file_loc begin_loc = parser->ahead->loc;
     if (accept_token(parser, TOKEN_LBRACKET)) {
         struct ast* dim = parser->ahead->tag == TOKEN_RBRACKET
-            ? parse_unsized_dim(parser)
+            ? parse_unsized_dim(parser, &begin_loc)
             : parse_expr(parser);
         expect_token(parser, TOKEN_RBRACKET);
         return dim;

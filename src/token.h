@@ -113,12 +113,19 @@ enum token_tag {
 typedef uintmax_t int_literal;
 typedef double float_literal;
 
+enum token_error {
+    TOKEN_ERROR_INVALID,
+    TOKEN_ERROR_UNTERMINATED_COMMENT,
+    TOKEN_ERROR_UNTERMINATED_STRING
+};
+
 struct token {
     enum token_tag tag;
     struct file_loc loc;
     union {
         int_literal int_literal;
         float_literal float_literal;
+        enum token_error error;
     };
 };
 
@@ -128,4 +135,6 @@ VEC_DECL(token_vec, struct token, PUBLIC)
 [[nodiscard]] bool token_tag_is_symbol(enum token_tag);
 [[nodiscard]] bool token_tag_is_keyword(enum token_tag);
 
-[[nodiscard]] struct str_view token_view(const char* data, const struct token*);
+[[nodiscard]] struct str_view token_view(const char* file_data, const struct token*);
+
+void token_log_error(struct log*, const char* file_data, const struct token*);

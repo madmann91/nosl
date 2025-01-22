@@ -1,18 +1,15 @@
 #include "lexer.h"
 
-#include <overture/log.h>
-
 #include <assert.h>
 #include <ctype.h>
 #include <inttypes.h>
 
-struct lexer lexer_create(const char* file_name, const char* file_data, size_t size, struct log* log) {
+struct lexer lexer_create(const char* file_name, const char* file_data, size_t size) {
     return (struct lexer) {
         .file_data = file_data,
         .bytes_left = size,
         .source_pos = { .row = 1, .col = 1, .bytes = 0 },
-        .file_name = file_name,
-        .log = log
+        .file_name = file_name
     };
 }
 
@@ -67,6 +64,16 @@ static inline struct token make_token(
             .end = lexer->source_pos
         }
     };
+}
+
+static inline struct token make_error_token(
+    struct lexer* lexer,
+    const struct source_pos* begin_pos,
+    enum token_error error)
+{
+    struct token token = make_token(lexer, begin_pos, TOKEN_ERROR);
+    token.error = error;
+    return token;
 }
 
 static inline bool accept_digit(struct lexer* lexer, int base) {
@@ -239,16 +246,8 @@ struct token lexer_advance(struct lexer* lexer) {
             }
             if (accept_char(lexer, '*')) {
                 while (true) {
-                    if (is_eof(lexer)) {
-                        log_error(lexer->log,
-                            &(struct file_loc) {
-                                .file_name = lexer->file_name,
-                                .begin = begin_pos,
-                                .end = lexer->source_pos
-                            },
-                            "unterminated multi-line comment");
-                        break;
-                    }
+                    if (is_eof(lexer))
+                        return make_error_token(lexer, &begin_pos, TOKEN_ERROR_UNTERMINATED_COMMENT);
                     if (accept_char(lexer, '*')) {
                         if (accept_char(lexer, '/'))
                             break;
@@ -300,14 +299,7 @@ struct token lexer_advance(struct lexer* lexer) {
                     return make_token(lexer, &begin_pos, TOKEN_STRING_LITERAL);
                 eat_char(lexer);
             }
-            log_error(lexer->log,
-                &(struct file_loc) {
-                    .file_name = lexer->file_name,
-                    .begin = begin_pos,
-                    .end = lexer->source_pos
-                },
-                "unterminated string literal");
-            return make_token(lexer, &begin_pos, TOKEN_ERROR);
+            return make_error_token(lexer, &begin_pos, TOKEN_ERROR_UNTERMINATED_STRING);
         }
 
         if (isalpha(cur_char(lexer)) || cur_char(lexer) == '_') {
@@ -321,11 +313,6 @@ struct token lexer_advance(struct lexer* lexer) {
         }
 
         eat_char(lexer);
-        struct token error_token = make_token(lexer, &begin_pos, TOKEN_ERROR);
-        struct str_view error_str = token_view(lexer->file_data, &error_token);
-        log_error(lexer->log,
-            &error_token.loc,
-            "invalid token '%.*s'", (int)error_str.length, error_str.data);
-        return error_token;
+        return make_error_token(lexer, &begin_pos, TOKEN_ERROR_INVALID);
     }
 }

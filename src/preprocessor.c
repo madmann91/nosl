@@ -105,6 +105,13 @@ static inline struct source_file* find_source_file(struct preprocessor* preproce
     return existing_file ? *existing_file : NULL;
 }
 
+static inline const char* find_source_file_data(struct preprocessor* preprocessor, const char* file_name) {
+    struct source_file* source_file = find_source_file(preprocessor, file_name);
+    if (!source_file)
+        return NULL;
+    return source_file->file_data;
+}
+
 static inline struct source_file* get_or_insert_source_file(struct preprocessor* preprocessor, const char* file_name) {
     const char* canonical_name = canonicalize_file_name(file_name);
     struct source_file* existing_file = find_source_file(preprocessor, canonical_name ? canonical_name : file_name);
@@ -137,24 +144,29 @@ bool preprocessor_include(struct preprocessor* preprocessor, const char* file_na
     base_context->lexer = lexer_create(
         source_file->file_name,
         source_file->file_data,
-        source_file->file_size,
-        preprocessor->log);
+        source_file->file_size);
 
     push_context(preprocessor, &base_context->context);
     return true;
 }
 
 struct token preprocessor_advance(struct preprocessor* preprocessor) {
-    struct token token;
-    do {
-        token = preprocessor->context->next_token(preprocessor->context);
-    } while (token.tag == TOKEN_NL);
-    return token;
+    while (true) {
+        struct token token = preprocessor->context->next_token(preprocessor->context);
+        if (token.tag == TOKEN_ERROR)
+        {
+            token_log_error(preprocessor->log, find_source_file_data(preprocessor, token.loc.file_name), &token);
+            continue;
+        }
+        else if (token.tag == TOKEN_NL)
+            continue;
+        return token;
+    }
 }
 
 struct str_view preprocessor_view(struct preprocessor* preprocessor, const struct token* token) {
-    struct source_file* source_file = find_source_file(preprocessor, token->loc.file_name);
-    if (!source_file)
+    const char* file_data = find_source_file_data(preprocessor, token->loc.file_name);
+    if (!file_data)
         return (struct str_view) {};
-    return token_view(source_file->file_data, token);
+    return token_view(file_data, token);
 }
