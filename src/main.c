@@ -57,7 +57,7 @@ static bool compile_file(
 
     bool status = true;
 
-    if (!preprocessor_include(preprocessor, file_name)) {
+    if (!preprocessor_open(preprocessor, file_name)) {
         log_error(&log, NULL, "cannot open '%s'\n", file_name);
         goto error;
     }

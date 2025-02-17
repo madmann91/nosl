@@ -45,6 +45,8 @@
     x(ATTRIBUTE, "__attribute__",)
 
 #define SYMBOL_LIST(x) \
+    x(HASH, "#",) \
+    x(CONCAT, "##",) \
     x(SEMICOLON, ";",) \
     x(COMMA, ",",) \
     x(DOT, ".",) \
@@ -136,5 +138,3 @@ VEC_DECL(token_vec, struct token, PUBLIC)
 [[nodiscard]] bool token_tag_is_keyword(enum token_tag);
 
 [[nodiscard]] struct str_view token_view(const char* file_data, const struct token*);
-
-void token_log_error(struct log*, const char* file_data, const struct token*);

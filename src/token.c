@@ -44,24 +44,3 @@ struct str_view token_view(const char* file_data, const struct token* token) {
         .length = token->loc.end.bytes - token->loc.begin.bytes
     };
 }
-
-void token_log_error(struct log* log, const char* file_data, const struct token* token) {
-    assert(token->tag == TOKEN_ERROR);
-    switch (token->error) {
-        case TOKEN_ERROR_INVALID:
-            {
-                struct str_view view = token_view(file_data, token);
-                log_error(log, &token->loc, "invalid token '%.*s'", (int)view.length, view.data);
-            }
-            break;
-        case TOKEN_ERROR_UNTERMINATED_COMMENT:
-            log_error(log, &token->loc, "unterminated multi-line comment");
-            break;
-        case TOKEN_ERROR_UNTERMINATED_STRING:
-            log_error(log, &token->loc, "unterminated string");
-            break;
-        default:
-            assert(false && "invalid token error");
-            break;
-    }
-}
