@@ -30,7 +30,9 @@
 
 struct cond {
     struct file_loc loc;
-    int value;
+    bool is_parent_active;
+    bool is_active;
+    bool was_active;
 };
 
 VEC_DEFINE(cond_stack, struct cond, PRIVATE)
@@ -115,8 +117,8 @@ static inline void push_context(struct preprocessor* preprocessor, struct contex
 static inline struct context* pop_context(struct preprocessor* preprocessor) {
     assert(preprocessor->context);
     if (!cond_stack_is_empty(&preprocessor->context->cond_stack)) {
-        struct cond cond = preprocessor->context->cond_stack.elems[preprocessor->context->cond_stack.elem_count - 1];
-        log_error(preprocessor->log, &cond.loc, "unterminated #if directive");
+        struct cond* last_cond = cond_stack_last(&preprocessor->context->cond_stack);
+        log_error(preprocessor->log, &last_cond->loc, "unterminated #if directive");
     }
     struct context* prev_context = preprocessor->context->prev;
     free_context(preprocessor->context);
@@ -331,27 +333,57 @@ static inline int parse_condition(struct preprocessor* preprocessor) {
 }
 
 static void parse_if(struct preprocessor* preprocessor) {
-    int value = parse_condition(preprocessor);
+    bool is_active = parse_condition(preprocessor) != 0;
+    bool is_parent_active = true;
+    if (!cond_stack_is_empty(&preprocessor->context->cond_stack)) {
+        struct cond* last_cond = cond_stack_last(&preprocessor->context->cond_stack);
+        is_parent_active = last_cond->is_parent_active & last_cond->is_active;
+    }
     cond_stack_push(&preprocessor->context->cond_stack, &(struct cond) {
-        .value = value,
+        .is_parent_active = is_parent_active,
+        .is_active = is_active,
+        .was_active = is_active,
         .loc = preprocessor->context->line_loc
     });
-    preprocessor->context->is_active &= value != 0;
+    preprocessor->context->is_active &= is_active;
     eat_extra_tokens(preprocessor, "if");
 }
 
-static void parse_endif(struct preprocessor* preprocessor) {
+static inline bool error_on_empty_cond_stack(struct preprocessor* preprocessor, const char* directive_name) {
     if (cond_stack_is_empty(&preprocessor->context->cond_stack)) {
-        log_error(preprocessor->log, &preprocessor->context->line_loc, "#endif without #if");
-    } else {
-        cond_stack_pop(&preprocessor->context->cond_stack);
+        log_error(preprocessor->log, &preprocessor->context->line_loc, "#%s without #if", directive_name);
+        return true;
     }
+    return false;
+}
+
+static inline void enter_elif(struct preprocessor* preprocessor, bool is_active) {
+    assert(!cond_stack_is_empty(&preprocessor->context->cond_stack));
+    struct cond* last_cond = cond_stack_last(&preprocessor->context->cond_stack);
+    is_active &= !last_cond->was_active;
+    last_cond->was_active |= is_active;
+    last_cond->is_active = is_active;
+    preprocessor->context->is_active = last_cond->is_parent_active & is_active;
+}
+
+static void parse_else(struct preprocessor* preprocessor) {
+    if (!error_on_empty_cond_stack(preprocessor, "else"))
+        enter_elif(preprocessor, true);
+    eat_extra_tokens(preprocessor, "else");
+}
+
+static void parse_elif(struct preprocessor* preprocessor) {
+    bool is_active = parse_condition(preprocessor) != 0;
+    if (!error_on_empty_cond_stack(preprocessor, "elif"))
+        enter_elif(preprocessor, is_active);
+    eat_extra_tokens(preprocessor, "elif");
+}
+
+static void parse_endif(struct preprocessor* preprocessor) {
     bool is_active = true;
-    VEC_FOREACH(struct cond, cond, preprocessor->context->cond_stack) {
-        if (cond->value == 0) {
-            is_active = false;
-            break;
-        }
+    if (!error_on_empty_cond_stack(preprocessor, "endif")) {
+        is_active = cond_stack_last(&preprocessor->context->cond_stack)->is_parent_active;
+        cond_stack_pop(&preprocessor->context->cond_stack);
     }
     preprocessor->context->is_active = is_active;
     eat_extra_tokens(preprocessor, "endif");
@@ -360,6 +392,8 @@ static void parse_endif(struct preprocessor* preprocessor) {
 static void parse_directive(struct preprocessor* preprocessor, enum directive directive) {
     switch (directive) {
         case DIRECTIVE_IF:    parse_if(preprocessor);    break;
+        case DIRECTIVE_ELSE:  parse_else(preprocessor);  break;
+        case DIRECTIVE_ELIF:  parse_elif(preprocessor);  break;
         case DIRECTIVE_ENDIF: parse_endif(preprocessor); break;
         default:
             assert(false && "invalid preprocessor directive");
