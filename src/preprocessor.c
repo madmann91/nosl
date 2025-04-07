@@ -24,6 +24,7 @@
     x(ELIFNDEF, "elifndef") \
     x(UNDEF, "undef") \
     x(PRAGMA, "pragma") \
+    x(FILE, "file") \
     x(LINE, "line") \
     x(WARNING, "warning") \
     x(ERROR, "error")
@@ -457,6 +458,23 @@ static void parse_error(struct preprocessor* preprocessor) {
     parse_warning_or_error(preprocessor, true);
 }
 
+static inline void ignore_directive(struct preprocessor* preprocessor, const char* directive_name) {
+    eat_extra_tokens(preprocessor, NULL);
+    log_warn(preprocessor->log, &preprocessor->context->line_loc, "ignoring preprocessor directive '#%s'", directive_name);
+}
+
+static void parse_line(struct preprocessor* preprocessor) {
+    ignore_directive(preprocessor, "line");
+}
+
+static void parse_file(struct preprocessor* preprocessor) {
+    ignore_directive(preprocessor, "file");
+}
+
+static void parse_pragma(struct preprocessor* preprocessor) {
+    ignore_directive(preprocessor, "pragma");
+}
+
 static void parse_directive(struct preprocessor* preprocessor, enum directive directive) {
     switch (directive) {
         case DIRECTIVE_IF:       parse_if(preprocessor);       break;
@@ -471,6 +489,9 @@ static void parse_directive(struct preprocessor* preprocessor, enum directive di
         case DIRECTIVE_UNDEF:    parse_undef(preprocessor);    break;
         case DIRECTIVE_WARNING:  parse_warning(preprocessor);  break;
         case DIRECTIVE_ERROR:    parse_error(preprocessor);    break;
+        case DIRECTIVE_LINE:     parse_line(preprocessor);     break;
+        case DIRECTIVE_FILE:     parse_file(preprocessor);     break;
+        case DIRECTIVE_PRAGMA:   parse_pragma(preprocessor);   break;
         default:
             assert(false && "invalid preprocessor directive");
             break;
