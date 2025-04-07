@@ -55,10 +55,10 @@ enum directive {
 #undef x
 };
 
-VEC_DEFINE(arg_vec, const char*, PRIVATE)
+VEC_DEFINE(param_vec, const char*, PRIVATE)
 
 struct macro {
-    struct arg_vec args;
+    struct param_vec params;
     struct token_vec tokens;
 };
 
@@ -84,13 +84,13 @@ struct preprocessor {
 
 static inline struct macro alloc_macro(void) {
     return (struct macro) {
-        .args   = arg_vec_create(),
+        .params = param_vec_create(),
         .tokens = token_vec_create()
     };
 }
 
 static inline void free_macro(struct macro* macro) {
-    arg_vec_destroy(&macro->args);
+    param_vec_destroy(&macro->params);
     token_vec_destroy(&macro->tokens);
 }
 
@@ -199,7 +199,7 @@ static inline enum directive directive_from_string(struct str_view string) {
     return DIRECTIVE_NONE;
 }
 
-static inline void eat_extra_tokens(struct preprocessor* preprocessor, const char* directive_name) {
+static inline struct file_loc eat_extra_tokens(struct preprocessor* preprocessor, const char* directive_name) {
     struct file_loc loc;
     bool has_extra_tokens = false;
     while (
@@ -212,11 +212,12 @@ static inline void eat_extra_tokens(struct preprocessor* preprocessor, const cha
         loc.end = token.loc.end;
         has_extra_tokens = true;
     }
-    if (has_extra_tokens)
+    if (directive_name && has_extra_tokens)
         log_error(preprocessor->log, &loc, "extra tokens at end of #%s directive", directive_name);
+    return loc;
 }
 
-static inline void parse_error(struct preprocessor* preprocessor, const char* msg) {
+static inline void preprocessor_error(struct preprocessor* preprocessor, const char* msg) {
     struct token token = read_token(preprocessor);
     struct str_view str_view = preprocessor_view(preprocessor, &token);
     log_error(preprocessor->log, &token.loc,
@@ -293,7 +294,7 @@ static inline int parse_condition(struct preprocessor* preprocessor) {
     switch (peek_token(preprocessor->context).tag) {
         case TOKEN_INT_LITERAL: return parse_literal(preprocessor);
         default:
-            parse_error(preprocessor, "condition");
+            preprocessor_error(preprocessor, "condition");
             return 0;
     }
 }
@@ -305,8 +306,7 @@ static const char* parse_ident(struct preprocessor* preprocessor) {
     return ident;
 }
 
-static void parse_if(struct preprocessor* preprocessor) {
-    bool is_active = parse_condition(preprocessor) != 0;
+static void enter_if(struct preprocessor* preprocessor, bool is_active) {
     bool is_parent_active = true;
     if (!cond_stack_is_empty(&preprocessor->context->cond_stack)) {
         struct cond* last_cond = cond_stack_last(&preprocessor->context->cond_stack);
@@ -319,7 +319,15 @@ static void parse_if(struct preprocessor* preprocessor) {
         .loc = preprocessor->context->line_loc
     });
     preprocessor->context->is_active &= is_active;
-    eat_extra_tokens(preprocessor, "if");
+}
+
+static inline void enter_elif(struct preprocessor* preprocessor, bool is_active) {
+    assert(!cond_stack_is_empty(&preprocessor->context->cond_stack));
+    struct cond* last_cond = cond_stack_last(&preprocessor->context->cond_stack);
+    is_active &= !last_cond->was_active;
+    last_cond->was_active |= is_active;
+    last_cond->is_active = is_active;
+    preprocessor->context->is_active = last_cond->is_parent_active & is_active;
 }
 
 static inline bool error_on_empty_cond_stack(struct preprocessor* preprocessor, const char* directive_name) {
@@ -330,13 +338,9 @@ static inline bool error_on_empty_cond_stack(struct preprocessor* preprocessor, 
     return false;
 }
 
-static inline void enter_elif(struct preprocessor* preprocessor, bool is_active) {
-    assert(!cond_stack_is_empty(&preprocessor->context->cond_stack));
-    struct cond* last_cond = cond_stack_last(&preprocessor->context->cond_stack);
-    is_active &= !last_cond->was_active;
-    last_cond->was_active |= is_active;
-    last_cond->is_active = is_active;
-    preprocessor->context->is_active = last_cond->is_parent_active & is_active;
+static void parse_if(struct preprocessor* preprocessor) {
+    enter_if(preprocessor, parse_condition(preprocessor) != 0);
+    eat_extra_tokens(preprocessor, "if");
 }
 
 static void parse_else(struct preprocessor* preprocessor) {
@@ -362,16 +366,38 @@ static void parse_endif(struct preprocessor* preprocessor) {
     eat_extra_tokens(preprocessor, "endif");
 }
 
-static void parse_ifdef(struct preprocessor*) {
+static inline bool is_defined(struct preprocessor* preprocessor, const char* ident) {
+    return macro_map_find(&preprocessor->macros, &ident) != NULL;
 }
 
-static void parse_ifndef(struct preprocessor*) {
+static inline void parse_ifdef_or_ifndef(struct preprocessor* preprocessor, bool is_ifndef) {
+    bool is_active = is_defined(preprocessor, parse_ident(preprocessor)) ^ is_ifndef;
+    enter_if(preprocessor, is_active);
+    eat_extra_tokens(preprocessor, is_ifndef ? "ifndef" : "ifdef");
 }
 
-static void parse_elifdef(struct preprocessor*) {
+static void parse_ifdef(struct preprocessor* preprocessor) {
+    parse_ifdef_or_ifndef(preprocessor, false);
 }
 
-static void parse_elifndef(struct preprocessor*) {
+static void parse_ifndef(struct preprocessor* preprocessor) {
+    parse_ifdef_or_ifndef(preprocessor, true);
+}
+
+static void parse_elifdef_or_elifndef(struct preprocessor* preprocessor, bool is_elifndef) {
+    const char* directive_name = is_elifndef ? "elifndef" : "elifdef";
+    bool is_active = is_defined(preprocessor, parse_ident(preprocessor)) ^ is_elifndef;
+    if (!error_on_empty_cond_stack(preprocessor, directive_name))
+        enter_elif(preprocessor, is_active);
+    eat_extra_tokens(preprocessor, directive_name);
+}
+
+static void parse_elifdef(struct preprocessor* preprocessor) {
+    parse_elifdef_or_elifndef(preprocessor, false);
+}
+
+static void parse_elifndef(struct preprocessor* preprocessor) {
+    parse_elifdef_or_elifndef(preprocessor, true);
 }
 
 static void parse_define(struct preprocessor* preprocessor) {
@@ -380,7 +406,7 @@ static void parse_define(struct preprocessor* preprocessor) {
     struct macro macro = alloc_macro();
     if (accept_token(preprocessor, TOKEN_LPAREN)) {
         while (peek_token(preprocessor->context).tag == TOKEN_IDENT) {
-            arg_vec_push(&macro.args, (const char*[]) { parse_ident(preprocessor) });
+            param_vec_push(&macro.params, (const char*[]) { parse_ident(preprocessor) });
             if (!accept_token(preprocessor, TOKEN_COMMA))
                 break;
         }
@@ -415,6 +441,22 @@ static void parse_undef(struct preprocessor* preprocessor) {
     eat_extra_tokens(preprocessor, "undef");
 }
 
+static void parse_warning_or_error(struct preprocessor* preprocessor, bool is_error) {
+    struct file_loc loc = eat_extra_tokens(preprocessor, NULL);
+    struct source_file* source_file = file_cache_find(preprocessor->file_cache, loc.file_name);
+    assert(source_file);
+    struct str_view msg = file_loc_view(&loc, source_file->file_data);
+    log_msg(is_error ? MSG_ERROR : MSG_WARN, preprocessor->log, &loc, "%.*s", (int)msg.length, msg.data);
+}
+
+static void parse_warning(struct preprocessor* preprocessor) {
+    parse_warning_or_error(preprocessor, false);
+}
+
+static void parse_error(struct preprocessor* preprocessor) {
+    parse_warning_or_error(preprocessor, true);
+}
+
 static void parse_directive(struct preprocessor* preprocessor, enum directive directive) {
     switch (directive) {
         case DIRECTIVE_IF:       parse_if(preprocessor);       break;
@@ -426,7 +468,9 @@ static void parse_directive(struct preprocessor* preprocessor, enum directive di
         case DIRECTIVE_ELIFDEF:  parse_elifdef(preprocessor);  break;
         case DIRECTIVE_ELIFNDEF: parse_elifndef(preprocessor); break;
         case DIRECTIVE_DEFINE:   parse_define(preprocessor);   break;
-        case DIRECTIVE_UNDEF:    parse_undef(preprocessor);   break;
+        case DIRECTIVE_UNDEF:    parse_undef(preprocessor);    break;
+        case DIRECTIVE_WARNING:  parse_warning(preprocessor);  break;
+        case DIRECTIVE_ERROR:    parse_error(preprocessor);    break;
         default:
             assert(false && "invalid preprocessor directive");
             break;
@@ -463,7 +507,6 @@ struct token preprocessor_advance(struct preprocessor* preprocessor) {
 
 struct str_view preprocessor_view(struct preprocessor* preprocessor, const struct token* token) {
     struct source_file* source_file = file_cache_find(preprocessor->file_cache, token->loc.file_name);
-    if (!source_file)
-        return (struct str_view) {};
+    assert(source_file);
     return token_view(token, source_file->file_data);
 }
