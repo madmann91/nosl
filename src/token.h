@@ -133,8 +133,9 @@ struct token {
 
 VEC_DECL(token_vec, struct token, PUBLIC)
 
+[[nodiscard]] struct str_view token_view(const struct token*, const char* file_data);
+[[nodiscard]] struct str_view token_string_literal_view(const struct token*, const char* file_data);
+
 [[nodiscard]] const char* token_tag_to_string(enum token_tag);
 [[nodiscard]] bool token_tag_is_symbol(enum token_tag);
 [[nodiscard]] bool token_tag_is_keyword(enum token_tag);
-
-[[nodiscard]] struct str_view token_view(const char* file_data, const struct token*);

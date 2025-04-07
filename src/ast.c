@@ -380,7 +380,9 @@ static void print(
             fprintf(file, ".%s", ast->proj_expr.elem);
             break;
         case AST_CAST_EXPR:
-            print_paren(file, indent, ast->cast_expr.type, styles);
+            // Only print the type if this is an explicit cast
+            if (ast->cast_expr.type)
+                print_paren(file, indent, ast->cast_expr.type, styles);
             print(file, indent, ast->cast_expr.value, styles);
             break;
         case AST_BLOCK:

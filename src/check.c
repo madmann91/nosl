@@ -194,7 +194,7 @@ static inline void insert_cast(
     copy->next = NULL;
     ast->tag = AST_CAST_EXPR;
     ast->cast_expr.type = NULL;
-    ast->cast_expr.value = ast;
+    ast->cast_expr.value = copy;
     ast->type = type;
 }
 

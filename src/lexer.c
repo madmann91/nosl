@@ -124,9 +124,9 @@ static inline struct token parse_literal(struct lexer* lexer) {
     bool is_float = has_exp || has_dot;
     struct token token = make_token(lexer, &begin_pos, is_float ? TOKEN_FLOAT_LITERAL : TOKEN_INT_LITERAL);
     if (is_float)
-        token.float_literal = strtod(token_view(lexer->file_data, &token).data, NULL);
+        token.float_literal = strtod(token_view(&token, lexer->file_data).data, NULL);
     else
-        token.int_literal = strtoumax(token_view(lexer->file_data, &token).data + prefix_len, NULL, base);
+        token.int_literal = strtoumax(token_view(&token, lexer->file_data).data + prefix_len, NULL, base);
     return token;
 }
 
@@ -312,7 +312,7 @@ struct token lexer_advance(struct lexer* lexer) {
             while (!is_eof(lexer) && (isalnum(cur_char(lexer)) || cur_char(lexer) == '_'))
                 eat_char(lexer);
             struct token token = make_token(lexer, &begin_pos, TOKEN_IDENT);
-            enum token_tag keyword_tag = find_keyword(token_view(lexer->file_data, &token));
+            enum token_tag keyword_tag = find_keyword(token_view(&token, lexer->file_data));
             if (keyword_tag != TOKEN_ERROR)
                 token.tag = keyword_tag;
             return token;

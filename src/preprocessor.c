@@ -1,14 +1,14 @@
 #include "preprocessor.h"
+#include "file_cache.h"
 #include "lexer.h"
 
 #include <overture/hash.h>
-#include <overture/set.h>
 #include <overture/mem.h>
-#include <overture/file.h>
+#include <overture/str_pool.h>
+#include <overture/mem_pool.h>
+#include <overture/map.h>
 
-#include <stdlib.h>
 #include <string.h>
-#include <limits.h>
 #include <assert.h>
 
 #define DIRECTIVE_LIST(x) \
@@ -48,15 +48,6 @@ struct context {
     bool on_new_line;
 };
 
-struct source_file {
-    const char* file_name;
-    const char* file_data;
-    size_t file_size;
-    struct token_vec tokens;
-    const char* include_guard;
-    bool has_include_guard;
-};
-
 enum directive {
     DIRECTIVE_NONE,
 #define x(name, ...) DIRECTIVE_##name,
@@ -64,33 +55,44 @@ enum directive {
 #undef x
 };
 
-static inline char* canonicalize_file_name(const char* file_name) {
-#if _XOPEN_SOURCE >= 500 || _DEFAULT_SOURCE || _BSD_SOURCE
-    return realpath(file_name, NULL);
-#elif WIN32
-    return _fullpath(NULL, file_name, 0);
-#else
-    return NULL;
-#endif
+VEC_DEFINE(arg_vec, const char*, PRIVATE)
+
+struct macro {
+    struct arg_vec args;
+    struct token_vec tokens;
+};
+
+static inline uint32_t hash_macro_name(uint32_t h, const char* const* name) {
+    return hash_uint64(h, (uint64_t)*name);
 }
 
-static inline uint32_t hash_source_file(uint32_t h, struct source_file* const* source_file) {
-    return hash_string(h, (*source_file)->file_name);
+static inline bool is_macro_name_equal(const char* const* name, const char* const* other_name) {
+    return *name == *other_name;
 }
 
-static inline bool is_same_source_file(struct source_file* const* source_file, struct source_file* const* other) {
-    return !strcmp((*source_file)->file_name, (*other)->file_name);
-}
-
-SET_DEFINE(source_file_set, struct source_file*, hash_source_file, is_same_source_file, PRIVATE)
+MAP_DEFINE(macro_map, const char*, struct macro, hash_macro_name, is_macro_name_equal, PRIVATE)
 
 struct preprocessor {
     struct log* log;
     struct context* context;
-    struct token last_token;
-    struct source_file_set source_files;
+    struct file_cache* file_cache;
+    struct macro_map macros;
     struct preprocessor_config config;
+    struct str_pool* str_pool;
+    struct mem_pool mem_pool;
 };
+
+static inline struct macro alloc_macro(void) {
+    return (struct macro) {
+        .args   = arg_vec_create(),
+        .tokens = token_vec_create()
+    };
+}
+
+static inline void free_macro(struct macro* macro) {
+    arg_vec_destroy(&macro->args);
+    token_vec_destroy(&macro->tokens);
+}
 
 static inline struct context* alloc_context(struct context* prev, struct source_file* source_file) {
     struct context* context = xcalloc(1, sizeof(struct context));
@@ -133,43 +135,53 @@ static inline size_t context_size(const struct context* context) {
     return context_tokens(context)->elem_count;
 }
 
-static inline struct token peek_token(const struct context* context, size_t offset) {
-    size_t index = context->current_token + offset;
-    size_t max_index = context_size(context) - 1;
-    return context_tokens(context)->elems[index > max_index ? max_index : index];
+static inline struct token peek_token(const struct context* context) {
+    return context_tokens(context)->elems[context->current_token];
 }
 
-static inline struct token read_token(struct context* context) {
-    struct token token = peek_token(context, 0);
-    bool end_reached = context->current_token >= context_size(context);
+static inline struct token last_token(const struct context* context) {
+    return context_tokens(context)->elems[context_size(context) - 1];
+}
+
+static inline struct token read_token(struct preprocessor* preprocessor) {
+    struct context* context = preprocessor->context;
+    assert(context);
+
+    while (context->current_token >= context_size(context)) {
+        if (!context->prev)
+            return last_token(context);
+        context = pop_context(preprocessor);
+    }
+
+    struct token token = peek_token(context);
     bool is_new_line = token.tag == TOKEN_NL;
     if (context->on_new_line) {
         context->line_loc = token.loc;
     } else if (!is_new_line) {
         context->line_loc.end = token.loc.end;
     }
-    context->current_token += end_reached ? 0 : 1;
     context->on_new_line = is_new_line;
+    context->current_token++;
     return token;
 }
 
-static inline struct token eat_token(struct context* context, enum token_tag tag) {
-    struct token token = read_token(context);
+static inline struct token eat_token(struct preprocessor* preprocessor, enum token_tag tag) {
+    struct token token = read_token(preprocessor);
     assert(token.tag == tag);
     return token;
 }
 
-static inline bool accept_token(struct context* context, enum token_tag tag) {
-    if (peek_token(context, 0).tag == tag) {
-        eat_token(context, tag);
+static inline bool accept_token(struct preprocessor* preprocessor, enum token_tag tag) {
+    if (peek_token(preprocessor->context).tag == tag) {
+        eat_token(preprocessor, tag);
         return true;
     }
     return false;
 }
 
 static inline bool expect_token(struct preprocessor* preprocessor, enum token_tag tag) {
-    if (!accept_token(preprocessor->context, tag)) {
-        struct token token = peek_token(preprocessor->context, 0);
+    if (!accept_token(preprocessor, tag)) {
+        struct token token = peek_token(preprocessor->context);
         struct str_view str_view = preprocessor_view(preprocessor, &token);
         log_error(preprocessor->log, &token.loc,
             "expected '%s', but got '%.*s'",
@@ -188,109 +200,63 @@ static inline enum directive directive_from_string(struct str_view string) {
 }
 
 static inline void eat_extra_tokens(struct preprocessor* preprocessor, const char* directive_name) {
+    struct file_loc loc;
     bool has_extra_tokens = false;
     while (
-        !accept_token(preprocessor->context, TOKEN_NL) &&
-        !accept_token(preprocessor->context, TOKEN_EOF))
+        !accept_token(preprocessor, TOKEN_NL) &&
+        !accept_token(preprocessor, TOKEN_EOF))
     {
+        struct token token = read_token(preprocessor);
+        if (!has_extra_tokens)
+            loc = token.loc;
+        loc.end = token.loc.end;
         has_extra_tokens = true;
-        read_token(preprocessor->context);
     }
-    if (has_extra_tokens) {
-        log_error(preprocessor->log, &preprocessor->context->line_loc, "extra tokens at end of #%s directive", directive_name);
-    }
+    if (has_extra_tokens)
+        log_error(preprocessor->log, &loc, "extra tokens at end of #%s directive", directive_name);
 }
 
 static inline void parse_error(struct preprocessor* preprocessor, const char* msg) {
-    struct token token = read_token(preprocessor->context);
+    struct token token = read_token(preprocessor);
     struct str_view str_view = preprocessor_view(preprocessor, &token);
     log_error(preprocessor->log, &token.loc,
         "expected %s, but got '%.*s'",
         msg, (int)str_view.length, str_view.data);
 }
 
-static inline struct source_file* alloc_source_file(const char* file_name) {
-    struct source_file* source_file = xcalloc(1, sizeof(struct source_file));
-    source_file->file_name = file_name;
-    source_file->file_data = file_read(file_name, &source_file->file_size);
-    source_file->tokens = token_vec_create();
-    struct lexer lexer = lexer_create(
-        source_file->file_name,
-        source_file->file_data,
-        source_file->file_size);
-    while (true) {
-        struct token token = lexer_advance(&lexer);
-        token_vec_push(&source_file->tokens, &token);
-        if (token.tag == TOKEN_EOF)
-            break;
-    }
-    return source_file;
-}
+struct preprocessor* preprocessor_open(
+    struct log* log,
+    const char* file_name,
+    struct file_cache* file_cache,
+    const struct preprocessor_config* config)
+{
+    struct source_file* source_file = file_cache_insert(file_cache, file_name);
+    if (!source_file)
+        return NULL;
 
-static inline void free_source_file(struct source_file* source_file) {
-    free((char*)source_file->file_name);
-    free((char*)source_file->file_data);
-    free((char*)source_file->include_guard);
-    token_vec_destroy(&source_file->tokens);
-    free(source_file);
-}
-
-static inline struct source_file* find_source_file(struct preprocessor* preprocessor, const char* file_name) {
-    struct source_file* source_file = &(struct source_file) { .file_name = file_name };
-    struct source_file* const* existing_file = source_file_set_find(&preprocessor->source_files, &source_file);
-    return existing_file ? *existing_file : NULL;
-}
-
-struct preprocessor* preprocessor_create(struct log* log, const struct preprocessor_config* config) {
     struct preprocessor* preprocessor = xmalloc(sizeof(struct preprocessor));
     preprocessor->log = log;
     preprocessor->context = NULL;
-    preprocessor->source_files = source_file_set_create();
+    preprocessor->file_cache = file_cache;
     preprocessor->config = *config;
+    preprocessor->macros = macro_map_create();
+    preprocessor->mem_pool = mem_pool_create();
+    preprocessor->str_pool = str_pool_create(&preprocessor->mem_pool);
+
+    push_context(preprocessor, alloc_context(NULL, source_file));
     return preprocessor;
 }
 
-void preprocessor_destroy(struct preprocessor* preprocessor) {
+void preprocessor_close(struct preprocessor* preprocessor) {
     while (preprocessor->context)
         pop_context(preprocessor);
-    SET_FOREACH(struct source_file*, source_file, preprocessor->source_files) {
-        free_source_file(*source_file);
+    MAP_FOREACH_VAL(struct macro, macro, preprocessor->macros) {
+        free_macro(macro);
     }
-    source_file_set_destroy(&preprocessor->source_files);
+    macro_map_destroy(&preprocessor->macros);
+    str_pool_destroy(preprocessor->str_pool);
+    mem_pool_destroy(&preprocessor->mem_pool);
     free(preprocessor);
-}
-
-static inline const char* find_source_file_data(struct preprocessor* preprocessor, const char* file_name) {
-    struct source_file* source_file = find_source_file(preprocessor, file_name);
-    if (!source_file)
-        return NULL;
-    return source_file->file_data;
-}
-
-static inline struct source_file* get_or_insert_source_file(struct preprocessor* preprocessor, const char* file_name) {
-    const char* canonical_name = canonicalize_file_name(file_name);
-    struct source_file* existing_file = find_source_file(preprocessor, canonical_name ? canonical_name : file_name);
-    if (existing_file) {
-        free((char*)canonical_name);
-        return existing_file;
-    }
-
-    if (!file_exists(file_name))
-        return NULL;
-
-    struct source_file* source_file = alloc_source_file(canonical_name ? canonical_name : strdup(file_name));
-    [[maybe_unused]] bool was_inserted = source_file_set_insert(&preprocessor->source_files, &source_file);
-    assert(was_inserted);
-    return source_file;
-}
-
-bool preprocessor_open(struct preprocessor* preprocessor, const char* file_name) {
-    struct source_file* source_file = get_or_insert_source_file(preprocessor, file_name);
-    if (!source_file)
-        return false;
-
-    push_context(preprocessor, alloc_context(NULL, source_file));
-    return true;
 }
 
 static void show_error(struct log* log, const char* file_data, const struct token* token) {
@@ -298,7 +264,7 @@ static void show_error(struct log* log, const char* file_data, const struct toke
     switch (token->error) {
         case TOKEN_ERROR_INVALID:
             {
-                struct str_view view = token_view(file_data, token);
+                struct str_view view = token_view(token, file_data);
                 log_error(log, &token->loc, "invalid token '%.*s'", (int)view.length, view.data);
             }
             break;
@@ -315,21 +281,28 @@ static void show_error(struct log* log, const char* file_data, const struct toke
 }
 
 static inline enum directive peek_directive(struct preprocessor* preprocessor) {
-    struct token token = peek_token(preprocessor->context, 0);
+    struct token token = peek_token(preprocessor->context);
     return directive_from_string(preprocessor_view(preprocessor, &token));
 }
 
 static inline int parse_literal(struct preprocessor* preprocessor) {
-    return eat_token(preprocessor->context, TOKEN_INT_LITERAL).int_literal;
+    return eat_token(preprocessor, TOKEN_INT_LITERAL).int_literal;
 }
 
 static inline int parse_condition(struct preprocessor* preprocessor) {
-    switch (peek_token(preprocessor->context, 0).tag) {
+    switch (peek_token(preprocessor->context).tag) {
         case TOKEN_INT_LITERAL: return parse_literal(preprocessor);
         default:
             parse_error(preprocessor, "condition");
             return 0;
     }
+}
+
+static const char* parse_ident(struct preprocessor* preprocessor) {
+    struct token token = peek_token(preprocessor->context);
+    const char* ident = str_pool_insert_view(preprocessor->str_pool, preprocessor_view(preprocessor, &token));
+    expect_token(preprocessor, TOKEN_IDENT);
+    return ident;
 }
 
 static void parse_if(struct preprocessor* preprocessor) {
@@ -389,12 +362,71 @@ static void parse_endif(struct preprocessor* preprocessor) {
     eat_extra_tokens(preprocessor, "endif");
 }
 
+static void parse_ifdef(struct preprocessor*) {
+}
+
+static void parse_ifndef(struct preprocessor*) {
+}
+
+static void parse_elifdef(struct preprocessor*) {
+}
+
+static void parse_elifndef(struct preprocessor*) {
+}
+
+static void parse_define(struct preprocessor* preprocessor) {
+    const struct file_loc loc = peek_token(preprocessor->context).loc;
+    const char* name = parse_ident(preprocessor);
+    struct macro macro = alloc_macro();
+    if (accept_token(preprocessor, TOKEN_LPAREN)) {
+        while (peek_token(preprocessor->context).tag == TOKEN_IDENT) {
+            arg_vec_push(&macro.args, (const char*[]) { parse_ident(preprocessor) });
+            if (!accept_token(preprocessor, TOKEN_COMMA))
+                break;
+        }
+        expect_token(preprocessor, TOKEN_RPAREN);
+    }
+    struct token token;
+    do {
+        token = read_token(preprocessor);
+        token_vec_push(&macro.tokens, &token);
+    } while (token.tag != TOKEN_NL);
+    struct macro* existing_macro = (struct macro*)macro_map_find(&preprocessor->macros, &name);
+    if (existing_macro) {
+        log_warn(preprocessor->log, &loc, "redefinition for macro '%s'", name);
+        free_macro(existing_macro);
+        *existing_macro = macro;
+    } else {
+        [[maybe_unused]] bool was_inserted = macro_map_insert(&preprocessor->macros, &name, &macro);
+        assert(was_inserted);
+    }
+}
+
+static void parse_undef(struct preprocessor* preprocessor) {
+    const struct file_loc loc = peek_token(preprocessor->context).loc;
+    const char* name = parse_ident(preprocessor);
+    struct macro* macro = (struct macro*)macro_map_find(&preprocessor->macros, &name);
+    if (!macro) {
+        log_error(preprocessor->log, &loc, "unknown macro '%s'", name);
+    } else {
+        free_macro(macro);
+        macro_map_remove(&preprocessor->macros, &name);
+    }
+    eat_extra_tokens(preprocessor, "undef");
+}
+
 static void parse_directive(struct preprocessor* preprocessor, enum directive directive) {
     switch (directive) {
-        case DIRECTIVE_IF:    parse_if(preprocessor);    break;
-        case DIRECTIVE_ELSE:  parse_else(preprocessor);  break;
-        case DIRECTIVE_ELIF:  parse_elif(preprocessor);  break;
-        case DIRECTIVE_ENDIF: parse_endif(preprocessor); break;
+        case DIRECTIVE_IF:       parse_if(preprocessor);       break;
+        case DIRECTIVE_ELSE:     parse_else(preprocessor);     break;
+        case DIRECTIVE_ELIF:     parse_elif(preprocessor);     break;
+        case DIRECTIVE_ENDIF:    parse_endif(preprocessor);    break;
+        case DIRECTIVE_IFDEF:    parse_ifdef(preprocessor);    break;
+        case DIRECTIVE_IFNDEF:   parse_ifndef(preprocessor);   break;
+        case DIRECTIVE_ELIFDEF:  parse_elifdef(preprocessor);  break;
+        case DIRECTIVE_ELIFNDEF: parse_elifndef(preprocessor); break;
+        case DIRECTIVE_DEFINE:   parse_define(preprocessor);   break;
+        case DIRECTIVE_UNDEF:    parse_undef(preprocessor);   break;
         default:
             assert(false && "invalid preprocessor directive");
             break;
@@ -404,12 +436,11 @@ static void parse_directive(struct preprocessor* preprocessor, enum directive di
 struct token preprocessor_advance(struct preprocessor* preprocessor) {
     while (true) {
         bool on_new_line = preprocessor->context->on_new_line;
-        struct token token = read_token(preprocessor->context);
-        if (token.tag == TOKEN_HASH && on_new_line && preprocessor->context->source_file)
-        {
+        struct token token = read_token(preprocessor);
+        if (token.tag == TOKEN_HASH && on_new_line && preprocessor->context->source_file) {
             enum directive directive = peek_directive(preprocessor);
             if (directive != DIRECTIVE_NONE) {
-                read_token(preprocessor->context);
+                read_token(preprocessor);
                 parse_directive(preprocessor, directive);
             }
             continue;
@@ -431,8 +462,8 @@ struct token preprocessor_advance(struct preprocessor* preprocessor) {
 }
 
 struct str_view preprocessor_view(struct preprocessor* preprocessor, const struct token* token) {
-    const char* file_data = find_source_file_data(preprocessor, token->loc.file_name);
-    if (!file_data)
+    struct source_file* source_file = file_cache_find(preprocessor->file_cache, token->loc.file_name);
+    if (!source_file)
         return (struct str_view) {};
-    return token_view(file_data, token);
+    return token_view(token, source_file->file_data);
 }
