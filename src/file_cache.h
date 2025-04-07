@@ -13,7 +13,7 @@ struct source_file {
 
 struct file_cache;
 
-struct file_cache* file_cache_create(void);
+[[nodiscard]] struct file_cache* file_cache_create(void);
 void file_cache_destroy(struct file_cache*);
-struct source_file* file_cache_find(const struct file_cache*, const char*);
+[[nodiscard]] struct source_file* file_cache_find(const struct file_cache*, const char*);
 struct source_file* file_cache_insert(struct file_cache*, const char*);

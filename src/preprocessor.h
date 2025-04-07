@@ -11,7 +11,7 @@ struct preprocessor_config {
     size_t include_path_count;
 };
 
-struct preprocessor* preprocessor_open(
+[[nodiscard]] struct preprocessor* preprocessor_open(
     struct log*,
     const char* file_name,
     struct file_cache*,

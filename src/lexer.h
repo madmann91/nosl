@@ -4,8 +4,6 @@
 
 #include "token.h"
 
-struct log;
-
 struct lexer {
     const char* file_data;
     const char* file_name;

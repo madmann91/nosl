@@ -165,7 +165,7 @@ static inline struct token read_token(struct preprocessor* preprocessor) {
     return token;
 }
 
-static inline struct token eat_token(struct preprocessor* preprocessor, enum token_tag tag) {
+static inline struct token eat_token(struct preprocessor* preprocessor, [[maybe_unused]] enum token_tag tag) {
     struct token token = read_token(preprocessor);
     assert(token.tag == tag);
     return token;
