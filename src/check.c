@@ -379,6 +379,19 @@ static inline struct ast* find_conflicting_overload(
     small_ast_vec_destroy(&symbols);
     return conflicting_overload;
 }
+static inline void insert_func_or_shader_symbol(struct type_checker* type_checker, struct ast* ast) {
+    const char* decl_name = ast_decl_name(ast);
+    struct ast* conflicting_overload = find_conflicting_overload(type_checker, decl_name, ast->type);
+    if (conflicting_overload) {
+        char* type_string = type_to_string(ast->type, &type_checker->type_print_options);
+        log_error(type_checker->log, &ast->loc, "redefinition for %s '%s' with type '%s'",
+            ast->tag == AST_FUNC_DECL ? "function" : "shader", decl_name, type_string);
+        report_previous_location(type_checker, &conflicting_overload->loc);
+        free(type_string);
+    } else {
+        insert_symbol(type_checker, decl_name, ast, true);
+    }
+}
 
 static void check_shader_or_func_decl(struct type_checker* type_checker, struct ast* ast) {
     assert(ast->tag == AST_FUNC_DECL || ast->tag == AST_SHADER_DECL);
@@ -426,19 +439,8 @@ static void check_shader_or_func_decl(struct type_checker* type_checker, struct 
 
     // Constructors are not placed into the environment, as they are not invoked like "real"
     // functions, but through a constructor expression instead.
-    if (!is_constructor) {
-        const char* decl_name = ast_decl_name(ast);
-        struct ast* conflicting_overload = find_conflicting_overload(type_checker, decl_name, ast->type);
-        if (conflicting_overload) {
-            char* type_string = type_to_string(ast->type, &type_checker->type_print_options);
-            log_error(type_checker->log, &ast->loc, "redefinition for %s '%s' with type '%s'",
-                ast->tag == AST_FUNC_DECL ? "function" : "shader", decl_name, type_string);
-            report_previous_location(type_checker, &conflicting_overload->loc);
-            free(type_string);
-        } else {
-            insert_symbol(type_checker, decl_name, ast, true);
-        }
-    }
+    if (!is_constructor)
+        insert_func_or_shader_symbol(type_checker, ast);
 }
 
 static void check_return_stmt(struct type_checker* type_checker, struct ast* ast) {
