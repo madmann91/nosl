@@ -1,0 +1,4 @@
+shader foo() {
+}
+shader foo(int i = 3) {
+}

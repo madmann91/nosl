@@ -1,0 +1,2 @@
+int f(float k) { return (int)k; }
+int f(float k) { return 1; }

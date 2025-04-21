@@ -1,0 +1,9 @@
+int f(int x[3]) {
+    int i = x[0] + x[1] + x[2];
+    int g(int j) { return j + i; }
+    return g(x[0]);
+}
+
+shader foo(output int x = 3) {
+    x = f({ 1, 2, 3});
+}

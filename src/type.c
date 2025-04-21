@@ -133,7 +133,7 @@ enum coercion_rank type_coercion_rank(const struct type* from, const struct type
 
     if (from->tag == TYPE_ARRAY && to->tag == TYPE_ARRAY &&
         from->array_type.elem_type == to->array_type.elem_type &&
-        (from->array_type.elem_count == 0 || (from->array_type.elem_count <= to->array_type.elem_count)))
+        (to->array_type.elem_count == 0 || (from->array_type.elem_count != 0 && from->array_type.elem_count <= to->array_type.elem_count)))
     {
         return COERCION_TO_ARRAY;
     }

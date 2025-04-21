@@ -269,6 +269,8 @@ static const struct type* check_type(struct type_checker* type_checker, struct a
         case AST_NAMED_TYPE:  return check_named_type(type_checker, ast);
         default:
             assert(false && "invalid type");
+            [[fallthrough]];
+        case AST_ERROR:
             return type_table_make_error_type(type_checker->type_table);
     }
 }
@@ -379,9 +381,12 @@ static inline struct ast* find_conflicting_overload(
     small_ast_vec_destroy(&symbols);
     return conflicting_overload;
 }
+
 static inline void insert_func_or_shader_symbol(struct type_checker* type_checker, struct ast* ast) {
     const char* decl_name = ast_decl_name(ast);
-    struct ast* conflicting_overload = find_conflicting_overload(type_checker, decl_name, ast->type);
+    struct ast* conflicting_overload = ast->tag == AST_SHADER_DECL
+        ? env_find_one_symbol(type_checker->env, decl_name)
+        : find_conflicting_overload(type_checker, decl_name, ast->type);
     if (conflicting_overload) {
         char* type_string = type_to_string(ast->type, &type_checker->type_print_options);
         log_error(type_checker->log, &ast->loc, "redefinition for %s '%s' with type '%s'",
@@ -544,10 +549,16 @@ static void check_stmt(struct type_checker* type_checker, struct ast* ast) {
         case AST_INDEX_EXPR:
         case AST_PROJ_EXPR:
         case AST_CAST_EXPR:
+        case AST_BOOL_LITERAL:
+        case AST_INT_LITERAL:
+        case AST_FLOAT_LITERAL:
+        case AST_STRING_LITERAL:
             check_expr(type_checker, ast, NULL);
             break;
         default:
             assert(false && "invalid statement");
+            [[fallthrough]];
+        case AST_ERROR:
             break;
     }
 }
@@ -1066,6 +1077,8 @@ static const struct type* check_expr(
         case AST_CAST_EXPR:      return check_cast_expr(type_checker, ast, expected_type);
         default:
             assert(false && "invalid expression");
+            [[fallthrough]];
+        case AST_ERROR:
             return type_table_make_error_type(type_checker->type_table);
     }
 }
@@ -1107,6 +1120,8 @@ static void check_top_level_decl(struct type_checker* type_checker, struct ast* 
             break;
         default:
             assert(false && "invalid declaration");
+            [[fallthrough]];
+        case AST_ERROR:
             break;
     }
 }

@@ -1,0 +1,5 @@
+shader foo() {
+    float f = "abcd" ? 1. : 0.;
+    float g = true ? 0. : 0.5;
+    float h = false ? 1.e10 : 0.;
+}

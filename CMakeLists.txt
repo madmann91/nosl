@@ -24,3 +24,8 @@ include(contrib/overture/cmake/Coverage.cmake)
 
 add_subdirectory(contrib)
 add_subdirectory(src)
+
+include(CTest)
+if (BUILD_TESTING)
+    add_subdirectory(test)
+endif()

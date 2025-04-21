@@ -1,0 +1,11 @@
+#if 0
+    #error "#if 0 executed!"
+#elif 0
+    #error "#elif 0 executed!"
+    #if 1
+        #error "#elif 0 - #if 1 executed!"
+    #else
+        #error "#elif 0 - #else executed!"
+    #endif
+#else
+#endif

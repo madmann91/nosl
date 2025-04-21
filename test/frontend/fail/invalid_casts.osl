@@ -1,0 +1,10 @@
+shader foo(float x[] = {1, 2}) {
+    float f = (float)"abcd";
+    int i = (int)"abcd";
+    vector v = (vector)"abcd";
+    point p = (point)"abcd";
+    normal n = (normal)"abcd";
+    color c = (color)"abcd";
+    matrix m = (matrix)"abcd";
+    float y[4] = x;
+}

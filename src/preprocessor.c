@@ -273,27 +273,6 @@ void preprocessor_close(struct preprocessor* preprocessor) {
     free(preprocessor);
 }
 
-static void show_error(struct log* log, const char* file_data, const struct token* token) {
-    assert(token->tag == TOKEN_ERROR);
-    switch (token->error) {
-        case TOKEN_ERROR_INVALID:
-            {
-                struct str_view view = token_view(token, file_data);
-                log_error(log, &token->loc, "invalid token '%.*s'", (int)view.length, view.data);
-            }
-            break;
-        case TOKEN_ERROR_UNTERMINATED_COMMENT:
-            log_error(log, &token->loc, "unterminated multi-line comment");
-            break;
-        case TOKEN_ERROR_UNTERMINATED_STRING:
-            log_error(log, &token->loc, "unterminated string");
-            break;
-        default:
-            assert(false && "invalid token error");
-            break;
-    }
-}
-
 static inline enum directive peek_directive(struct preprocessor* preprocessor) {
     struct token token = peek_token(preprocessor->context);
     return directive_from_string(preprocessor_view(preprocessor, &token));
@@ -333,6 +312,8 @@ static inline bool eval_cond(struct preprocessor* preprocessor, enum cond_value 
         case COND_TRUE:
             return true;
         default:
+            assert(false && "invalid condition value");
+            [[fallthrough]];
         case COND_FALSE:
             return false;
     }
@@ -552,6 +533,27 @@ static void parse_directive(struct preprocessor* preprocessor, enum directive di
     }
 }
 
+static void print_token_error(struct log* log, const char* file_data, const struct token* token) {
+    assert(token->tag == TOKEN_ERROR);
+    switch (token->error) {
+        case TOKEN_ERROR_INVALID:
+            {
+                struct str_view view = token_view(token, file_data);
+                log_error(log, &token->loc, "invalid token '%.*s'", (int)view.length, view.data);
+            }
+            break;
+        case TOKEN_ERROR_UNTERMINATED_COMMENT:
+            log_error(log, &token->loc, "unterminated multi-line comment");
+            break;
+        case TOKEN_ERROR_UNTERMINATED_STRING:
+            log_error(log, &token->loc, "unterminated string");
+            break;
+        default:
+            assert(false && "invalid token error");
+            break;
+    }
+}
+
 struct token preprocessor_advance(struct preprocessor* preprocessor) {
     while (true) {
         bool on_new_line = preprocessor->context->on_new_line;
@@ -572,7 +574,7 @@ struct token preprocessor_advance(struct preprocessor* preprocessor) {
             continue;
         } else if (token.tag == TOKEN_ERROR) {
             const char* file_data = preprocessor_view(preprocessor, &token).data;
-            show_error(preprocessor->log, file_data, &token);
+            print_token_error(preprocessor->log, file_data, &token);
             continue;
         }
 

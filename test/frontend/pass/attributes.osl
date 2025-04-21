@@ -1,0 +1,8 @@
+shader g(
+    int x = 3 [[ string widget = "slider", int min = 0, int max = 100 ]],
+    float f = 3 [[ float min = 0., float max = 10.0 ]],
+    bool is_blue = false [[ string widget = "checkbox" ]],
+    output int y = 44)
+{
+    y = 3;
+}

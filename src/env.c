@@ -99,6 +99,8 @@ void env_destroy(struct env* env) {
 
 struct ast* env_find_enclosing_shader_or_func(struct env* env) {
     for (struct scope* scope = env->scope; scope; scope = scope->prev) {
+        if (!scope->ast)
+            continue;
         if (scope->ast->tag == AST_SHADER_DECL || scope->ast->tag == AST_FUNC_DECL)
             return scope->ast;
     }
@@ -107,6 +109,8 @@ struct ast* env_find_enclosing_shader_or_func(struct env* env) {
 
 struct ast* env_find_enclosing_loop(struct env* env) {
     for (struct scope* scope = env->scope; scope; scope = scope->prev) {
+        if (!scope->ast)
+            continue;
         if (scope->ast->tag == AST_WHILE_LOOP ||
             scope->ast->tag == AST_FOR_LOOP ||
             scope->ast->tag == AST_DO_WHILE_LOOP)

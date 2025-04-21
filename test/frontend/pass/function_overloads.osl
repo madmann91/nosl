@@ -1,0 +1,20 @@
+struct T { string s; };
+struct S { string s; T t; };
+struct U { float x, y, z; };
+
+void f(S s) {}
+void f(T t) {}
+void f(output vector v) { v = 1; }
+void f(U u) {}
+void f(float i[]) {}
+
+shader foo() {
+    f({ "abcd" });
+    f({ "abcd", { "efgh" } });
+
+    vector v;
+    f(v);
+
+    f({ 1, 2, 3 });
+    f({ 1, 2, 3, 4 });
+}

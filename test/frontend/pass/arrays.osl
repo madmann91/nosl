@@ -1,0 +1,7 @@
+void f(float x[]) {}
+void g(float x[4]) {}
+shader foo() {
+    float a[4] = {1, 2, 3, 4};
+    f(a);
+    g(a);
+}

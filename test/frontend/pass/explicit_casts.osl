@@ -1,0 +1,32 @@
+shader foo() {
+    float f = 1.0;
+    int i = (int)f;
+    bool b = (bool)i;
+    vector vb = (vector)b;
+    vector vi = (vector)i;
+    vector vf = (vector)f;
+    point pb = (point)b;
+    point pi = (point)i;
+    point pf = (point)f;
+    normal nb = (normal)b;
+    normal ni = (normal)i;
+    normal nf = (normal)f;
+    color cb = (color)b;
+    color ci = (color)i;
+    color cf = (color)f;
+    matrix mb = (matrix)b;
+    matrix mi = (matrix)i;
+    matrix mf = (matrix)f;
+    vector vc = (vector)cb; 
+    vector vp = (vector)pb; 
+    vector vn = (vector)nb; 
+    normal nc = (normal)cb; 
+    normal np = (normal)pb; 
+    normal nv = (normal)vb; 
+    point pc = (point)cb; 
+    point pn = (point)nb; 
+    point pv = (point)vb; 
+    color cp = (color)pb; 
+    color cn = (color)nb; 
+    color cv = (color)vb; 
+}

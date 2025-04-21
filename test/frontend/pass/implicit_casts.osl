@@ -1,0 +1,40 @@
+shader foo() {
+    string s = "abcd";
+
+    bool b = true;
+    int i = 1;
+    float f = 1.;
+    bool bs = s;
+
+    int ib = b;
+    float fi = i;
+    float fb = b;
+
+    vector vi = i;
+    point pi = i;
+    normal ni = i;
+    color ci = i;
+    matrix mi = i;
+
+    vector vf = f;
+    point pf = f;
+    normal nf = f;
+    color cf = f;
+    matrix mf = f;
+
+    vector vn = nf;
+    point pn = nf;
+    color cn = nf;
+
+    vector vp = pf;
+    normal np = pf;
+    color cp = pf;
+
+    vector vc = cf;
+    normal nc = cf;
+    point pc = cf;
+
+    color cv = vf;
+    normal nv = vf;
+    point pv = vf;
+}

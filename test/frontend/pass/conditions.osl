@@ -1,0 +1,9 @@
+shader foo() {
+    if (true) {
+    }
+    if (false) {
+    } else {
+        if ("abcd") {
+        }
+    }
+}

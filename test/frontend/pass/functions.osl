@@ -1,0 +1,11 @@
+void f() {}
+int f() { return 1; }
+float f() { return 2; }
+int f(int i) { return 3; }
+
+shader foo() {
+    int i = f();
+    float j = f();
+    int k = f(1);
+    f();
+}
