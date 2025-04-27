@@ -93,8 +93,9 @@ enum coercion_rank {
     COERCION_TO_BOOL,
     COERCION_TO_FLOAT,
     COERCION_TO_INT,
+    COERCION_TO_VOID,
 
-    COERCION_EXACT = 100
+    COERCION_EXACT
 };
 
 SMALL_VEC_DECL(small_type_vec, const struct type*, PUBLIC)

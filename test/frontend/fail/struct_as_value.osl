@@ -1,0 +1,4 @@
+struct S { int a, b, c; };
+shader bar() {
+    (false ? S : S)(1, 2, 3);
+}

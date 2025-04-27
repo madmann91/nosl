@@ -1,0 +1,6 @@
+void foo(vector v) {}
+void foo(point p) {}
+
+shader bar() {
+    foo({1., 2., 3.});
+}

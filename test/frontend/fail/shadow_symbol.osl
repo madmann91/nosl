@@ -1,0 +1,6 @@
+shader foo() {
+    int x;
+    {
+        int x;
+    }
+}

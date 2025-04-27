@@ -1,0 +1,4 @@
+int foo() {}
+shader bar() {
+    (false ? foo : foo)();
+}

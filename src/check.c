@@ -135,11 +135,8 @@ static inline void report_too_many_fields(
     size_t field_count)
 {
     assert(type->tag == TYPE_STRUCT);
-    log_error(type_checker->log, loc,
-        "expected %zu %s for type '%s', but got %zu",
-        type->struct_type.field_count,
-        type->struct_type.field_count > 1 ? "initializers" : "initializer",
-        type->struct_type.name, field_count);
+    log_error(type_checker->log, loc, "expected %zu initializer(s) for type '%s', but got %zu",
+        type->struct_type.field_count, type->struct_type.name, field_count);
 }
 
 static inline void report_lossy_coercion(
@@ -162,8 +159,8 @@ static inline void report_incomplete_coercion(
     const struct type* type,
     const struct type* expected_type)
 {
-    if (type->tag == TYPE_COMPOUND && expected_type->tag == TYPE_STRUCT)
-        report_missing_field(type_checker, loc, expected_type, type->compound_type.elem_count, false);
+    assert(type->tag == TYPE_COMPOUND && expected_type->tag == TYPE_STRUCT);
+    report_missing_field(type_checker, loc, expected_type, type->compound_type.elem_count, false);
 }
 
 static inline void insert_symbol(
@@ -553,8 +550,11 @@ static void check_stmt(struct type_checker* type_checker, struct ast* ast) {
         case AST_INT_LITERAL:
         case AST_FLOAT_LITERAL:
         case AST_STRING_LITERAL:
-            check_expr(type_checker, ast, NULL);
+        {
+            const struct type* void_type = type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_VOID);
+            check_expr(type_checker, ast, void_type);
             break;
+        }
         default:
             assert(false && "invalid statement");
             [[fallthrough]];
@@ -682,7 +682,7 @@ static struct ast* find_best_candidate(
         if (candidates[i] == best_candidate)
             continue;
         // Exit if an ambiguity is detected (when no candidate is the best).
-        if (is_better_candidate(candidates[i], best_candidate, ret_type, args))
+        if (!is_better_candidate(best_candidate, candidates[i], ret_type, args))
             return NULL;
     }
     return best_candidate;
@@ -841,7 +841,7 @@ static const struct type* check_binary_expr(
 
     const char* func_name = binary_expr_tag_to_func_name(ast->binary_expr.tag);
     struct ast* symbol = find_func_or_struct_with_name(type_checker, &ast->loc, func_name, expected_type, ast->binary_expr.args);
-    if (!symbol || symbol->tag == AST_STRUCT_DECL)
+    if (!symbol)
         return ast->type = type_table_make_error_type(type_checker->type_table);
 
     ast->unary_expr.symbol = symbol;
@@ -1084,6 +1084,13 @@ static const struct type* check_expr(
 }
 
 static void check_struct_decl(struct type_checker* type_checker, struct ast* ast) {
+    static const char* operator_prefix = "__operator__";
+    if (!strncmp(ast->struct_decl.name, operator_prefix, strlen(operator_prefix))) {
+        log_error(type_checker->log, &ast->loc, "structure name '%s' is not allowed", ast->struct_decl.name);
+        log_note(type_checker->log, NULL, "names beginning with '%s' are reserved for functions", operator_prefix);
+        return;
+    }
+
     insert_symbol(type_checker, ast->struct_decl.name, ast, false);
     env_push_scope(type_checker->env, ast);
     struct type* struct_type = type_table_create_struct_type(type_checker->type_table, ast_field_count(ast));

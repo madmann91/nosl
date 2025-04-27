@@ -1,0 +1,6 @@
+struct __operator__add__ {
+    int a, b;
+};
+
+shader foo() {
+}

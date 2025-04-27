@@ -1,0 +1,13 @@
+void f(float x, float y, float z) {}
+shader foo() {
+    vector v = 1;
+    point p = 1;
+    normal n = 1;
+    color c = 1;
+
+    f(v.x, v.y, v.z);
+    f(p.x, p.y, p.z);
+    f(n.x, n.y, n.z);
+
+    f(c.r, c.g, c.b);
+}

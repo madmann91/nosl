@@ -1,0 +1,4 @@
+void foo(T t) {}
+shader bar() {
+    int j = i;
+}

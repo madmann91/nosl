@@ -1,0 +1,11 @@
+struct S { int a, b; string s; };
+S foo(S s) { return s; }
+
+shader bar() {
+    {
+        S s = { 1, 2, "abcd" };
+        int a = s.a;
+    }
+    int b = foo({ 1, 2, "abcd" }).b;
+    string s = S(1, 2, "abcd").s;
+}

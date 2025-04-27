@@ -1,0 +1,5 @@
+struct S { int a, b, c; };
+void foo(S s) {}
+shader bar() {
+    foo({ 1, 2 });
+}

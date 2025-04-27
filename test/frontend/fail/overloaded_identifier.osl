@@ -1,0 +1,7 @@
+void foo() {}
+float foo() { return 1.; }
+float bar() { return 2.; }
+
+shader baz() {
+    (true ? foo : bar)();
+}

@@ -1,0 +1,4 @@
+struct S { int a, b, c; };
+shader foo() {
+    S s = S(1, 2);
+}

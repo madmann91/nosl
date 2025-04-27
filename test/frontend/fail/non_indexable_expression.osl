@@ -1,0 +1,5 @@
+int f(int i) { return i; }
+shader foo() {
+    int i;
+    f(i[2]);
+}

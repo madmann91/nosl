@@ -63,6 +63,9 @@ static enum coercion_rank type_coercion_rank_prim(const struct type* from, enum 
             return COERCION_EXACT;
 
         static const enum coercion_rank rank_matrix[PRIM_TYPE_COUNT][PRIM_TYPE_COUNT] = {
+#define x(name, ...) [PRIM_TYPE_##name][PRIM_TYPE_VOID] = COERCION_TO_VOID,
+            PRIM_TYPE_LIST(x)
+#undef x
             [PRIM_TYPE_BOOL  ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
             [PRIM_TYPE_INT   ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
             [PRIM_TYPE_FLOAT ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
@@ -156,8 +159,7 @@ enum coercion_rank type_coercion_rank(const struct type* from, const struct type
         (to->array_type.elem_count == 0 || from->compound_type.elem_count <= to->array_type.elem_count))
     {
         enum coercion_rank min_rank =
-            to->array_type.elem_count == 0 || (from->compound_type.elem_count == to->array_type.elem_count)
-            ? COERCION_EXACT : COERCION_ELLIPSIS;
+            from->compound_type.elem_count == to->array_type.elem_count ? COERCION_EXACT : COERCION_ELLIPSIS;
         for (size_t i = 0; i < from->compound_type.elem_count; ++i) {
             enum coercion_rank rank = type_coercion_rank(
                 from->compound_type.elem_types[i],
