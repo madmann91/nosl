@@ -1,0 +1,3 @@
+#define DECL(x, y) x(int y)
+
+int DECL(foo, ret) { return ret; }
