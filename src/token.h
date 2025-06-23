@@ -104,7 +104,8 @@
     x(ERROR, "<invalid token>",) \
     x(INT_LITERAL, "<integer literal>",) \
     x(FLOAT_LITERAL, "<floating-point literal>",) \
-    x(STRING_LITERAL, "<string literal>",)
+    x(STRING_LITERAL, "<string literal>",) \
+    x(MACRO_PARAM, "<macro parameter>",)
 
 enum token_tag {
 #define x(tag, ...) TOKEN_##tag,
@@ -128,10 +129,12 @@ struct token {
         int_literal int_literal;
         float_literal float_literal;
         enum token_error error;
+        size_t macro_param;
     };
 };
 
 VEC_DECL(token_vec, struct token, PUBLIC)
+SMALL_VEC_DECL(small_token_vec, struct token, PUBLIC)
 
 [[nodiscard]] struct str_view token_view(const struct token*, const char* file_data);
 [[nodiscard]] struct str_view token_string_literal_view(const struct token*, const char* file_data);

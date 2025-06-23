@@ -432,7 +432,8 @@ static void check_shader_or_func_decl(struct type_checker* type_checker, struct 
     if (ast->func_decl.body) {
         if (is_builtin)
             log_error(type_checker->log, &ast->loc, "built-in function cannot have a body");
-        check_block_without_scope(type_checker, ast->func_decl.body);
+        if (ast->func_decl.body->tag != AST_ERROR)
+            check_block_without_scope(type_checker, ast->func_decl.body);
     } else if (!is_builtin) {
         log_error(type_checker->log, &ast->loc, "missing function body");
     }

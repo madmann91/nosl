@@ -36,8 +36,7 @@ add_nosl_test(FILE "preprocessor/pass/line.osl")
 add_nosl_test(FILE "preprocessor/pass/pragma.osl")
 add_nosl_test(FILE "preprocessor/pass/undef.osl")
 
-# Tests that need macro expansion to work
-#add_nosl_test(FILE "preprocessor/pass/define.osl")
+add_nosl_test(FILE "preprocessor/pass/define.osl")
 
 # Frontend Tests ----------------------------------------------------------------------------------
 

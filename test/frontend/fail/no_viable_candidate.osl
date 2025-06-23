@@ -1,5 +1,6 @@
 void foo() {}
 string foo() { return "abcd"; }
+vector foo(int x, float y) { return 1; }
 
 shader bar() {
     vector v = foo();

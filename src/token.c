@@ -3,6 +3,7 @@
 #include <assert.h>
 
 VEC_IMPL(token_vec, struct token, PUBLIC)
+SMALL_VEC_IMPL(small_token_vec, struct token, PUBLIC)
 
 struct str_view token_view(const struct token* token, const char* file_data) {
     return file_loc_view(&token->loc, file_data);

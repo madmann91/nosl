@@ -1,3 +1,5 @@
-#define DECL(x, y) x(int y)
-
-int DECL(foo, ret) { return ret; }
+#define DECL(name, x) __attribute__((name)) int foo x
+#define A B
+#define B A
+#define C A
+DECL(always_inline, (int x, int y)) { int A = 1; return C; }

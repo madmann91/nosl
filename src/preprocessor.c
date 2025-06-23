@@ -6,7 +6,7 @@
 #include <overture/mem.h>
 #include <overture/str_pool.h>
 #include <overture/mem_pool.h>
-#include <overture/map.h>
+#include <overture/set.h>
 
 #include <string.h>
 #include <assert.h>
@@ -43,18 +43,11 @@ struct cond {
     bool was_last_else;
 };
 
-VEC_DEFINE(cond_stack, struct cond, PRIVATE)
-
-struct context {
-    struct context* prev;
-    struct source_file* source_file;
+struct macro {
+    bool has_params;
+    size_t param_count;
+    const char* name;
     struct token_vec tokens;
-    struct cond_stack cond_stack;
-    size_t inactive_cond_depth;
-    struct file_loc line_loc;
-    size_t current_token;
-    bool is_active;
-    bool on_new_line;
 };
 
 enum directive {
@@ -64,59 +57,92 @@ enum directive {
 #undef x
 };
 
-VEC_DEFINE(param_vec, const char*, PRIVATE)
+VEC_DEFINE(cond_stack, struct cond, PRIVATE)
+SMALL_VEC_DEFINE(small_str_view_vec, struct str_view, PRIVATE)
+SMALL_VEC_DEFINE(small_index_vec, size_t, PRIVATE)
 
-struct macro {
-    struct param_vec params;
-    struct token_vec tokens;
+enum context_tag {
+    CONTEXT_SOURCE_FILE,
+    CONTEXT_MACRO
 };
 
-static inline uint32_t hash_macro_name(uint32_t h, const char* const* name) {
-    return hash_uint64(h, (uint64_t)*name);
+struct context {
+    enum context_tag tag;
+    bool is_active;
+    bool on_new_line;
+
+    struct file_loc line_loc;
+    struct context* prev;
+    size_t token_index;
+
+    union {
+        struct {
+            struct source_file* source_file;
+            struct cond_stack cond_stack;
+            size_t inactive_cond_depth;
+        } source_file_context;
+        struct {
+            const struct macro* macro;
+            struct token_vec tokens;
+        } macro_context;
+    };
+};
+
+static inline uint32_t hash_macro_name(uint32_t h, const struct macro* macro) {
+    return hash_uint64(h, (uint64_t)macro->name);
 }
 
-static inline bool is_macro_name_equal(const char* const* name, const char* const* other_name) {
-    return *name == *other_name;
+static inline bool is_macro_name_equal(const struct macro* macro, const struct macro* other_macro) {
+    return macro->name == other_macro->name;
 }
 
-MAP_DEFINE(macro_map, const char*, struct macro, hash_macro_name, is_macro_name_equal, PRIVATE)
+SET_DEFINE(macro_set, struct macro, hash_macro_name, is_macro_name_equal, PRIVATE)
 
 struct preprocessor {
     struct log* log;
     struct context* context;
     struct file_cache* file_cache;
-    struct macro_map macros;
+    struct macro_set macros;
     struct preprocessor_config config;
     struct str_pool* str_pool;
     struct mem_pool mem_pool;
 };
 
-static inline struct macro alloc_macro(void) {
-    return (struct macro) {
-        .params = param_vec_create(),
-        .tokens = token_vec_create()
-    };
-}
-
-static inline void free_macro(struct macro* macro) {
-    param_vec_destroy(&macro->params);
+static inline void destroy_macro(struct macro* macro) {
     token_vec_destroy(&macro->tokens);
+    memset(macro, 0, sizeof(struct macro));
 }
 
-static inline struct context* alloc_context(struct context* prev, struct source_file* source_file) {
+static inline struct context* alloc_context(struct context* prev) {
     struct context* context = xcalloc(1, sizeof(struct context));
     context->prev = prev;
-    context->source_file = source_file;
-    context->tokens = token_vec_create();
-    context->cond_stack = cond_stack_create();
     context->on_new_line = true;
     context->is_active = true;
     return context;
 }
 
+static inline struct context* alloc_source_file_context(struct context* prev, struct source_file* source_file) {
+    struct context* context = alloc_context(prev);
+    context->tag = CONTEXT_SOURCE_FILE;
+    context->source_file_context.source_file = source_file;
+    context->source_file_context.cond_stack = cond_stack_create();
+    return context;
+}
+
+static inline struct context* alloc_macro_context(struct context* prev, const struct macro* macro) {
+    struct context* context = alloc_context(prev);
+    context->tag = CONTEXT_MACRO;
+    context->macro_context.macro = macro;
+    context->macro_context.tokens = token_vec_create();
+    return context;
+}
+
 static inline void free_context(struct context* context) {
-    token_vec_destroy(&context->tokens);
-    cond_stack_destroy(&context->cond_stack);
+    if (context->tag == CONTEXT_SOURCE_FILE) {
+        cond_stack_destroy(&context->source_file_context.cond_stack);
+    } else if (context->tag == CONTEXT_MACRO) {
+        token_vec_destroy(&context->macro_context.tokens);
+    }
     free(context);
 }
 
@@ -126,13 +152,15 @@ static inline void push_context(struct preprocessor* preprocessor, struct contex
 }
 
 static inline bool is_inside_cond(const struct context* context) {
-    return !cond_stack_is_empty(&context->cond_stack) || context->inactive_cond_depth > 0;
+    return context->tag == CONTEXT_SOURCE_FILE &&
+        (!cond_stack_is_empty(&context->source_file_context.cond_stack) ||
+         context->source_file_context.inactive_cond_depth > 0);
 }
 
 static inline struct context* pop_context(struct preprocessor* preprocessor) {
     assert(preprocessor->context);
     if (is_inside_cond(preprocessor->context)) {
-        struct cond* last_cond = cond_stack_last(&preprocessor->context->cond_stack);
+        struct cond* last_cond = cond_stack_last(&preprocessor->context->source_file_context.cond_stack);
         log_error(preprocessor->log, &last_cond->loc, "unterminated '#if'");
     }
     struct context* prev_context = preprocessor->context->prev;
@@ -141,7 +169,9 @@ static inline struct context* pop_context(struct preprocessor* preprocessor) {
 }
 
 static inline const struct token_vec* context_tokens(const struct context* context) {
-    return context->source_file ? &context->source_file->tokens : &context->tokens;
+    return context->tag == CONTEXT_SOURCE_FILE
+        ? &context->source_file_context.source_file->tokens
+        : &context->macro_context.tokens;
 }
 
 static inline size_t context_size(const struct context* context) {
@@ -149,7 +179,7 @@ static inline size_t context_size(const struct context* context) {
 }
 
 static inline struct token peek_token(const struct context* context) {
-    return context_tokens(context)->elems[context->current_token];
+    return context_tokens(context)->elems[context->token_index];
 }
 
 static inline struct token last_token(const struct context* context) {
@@ -160,7 +190,7 @@ static inline struct token read_token(struct preprocessor* preprocessor) {
     struct context* context = preprocessor->context;
     assert(context);
 
-    while (context->current_token >= context_size(context)) {
+    while (context->token_index >= context_size(context)) {
         if (!context->prev)
             return last_token(context);
         context = pop_context(preprocessor);
@@ -174,7 +204,7 @@ static inline struct token read_token(struct preprocessor* preprocessor) {
         context->line_loc.end = token.loc.end;
     }
     context->on_new_line = is_new_line;
-    context->current_token++;
+    context->token_index++;
     return token;
 }
 
@@ -203,6 +233,92 @@ static inline bool expect_token(struct preprocessor* preprocessor, enum token_ta
         return false;
     }
     return true;
+}
+
+static inline struct context* expand_macro(struct preprocessor* preprocessor, const struct macro* macro) {
+    struct context* context = alloc_macro_context(preprocessor->context, macro);
+
+    struct small_token_vec args;
+    struct small_index_vec args_begin;
+    small_token_vec_init(&args);
+    small_index_vec_init(&args_begin);
+    small_index_vec_push(&args_begin, &args.elem_count);
+    if (macro->has_params > 0) {
+        eat_token(preprocessor, TOKEN_LPAREN);
+        size_t paren_depth = 0;
+        while (true) {
+            struct token token = read_token(preprocessor);
+            if (token.tag == TOKEN_EOF) {
+                log_error(preprocessor->log, &token.loc, "unterminated argument list for macro '%s'", macro->name);
+                break;
+            } else if (token.tag == TOKEN_RPAREN) {
+                if (paren_depth == 0)
+                    break;
+                paren_depth--;
+            } else if (token.tag == TOKEN_LPAREN) {
+                paren_depth++;
+            } else if (token.tag == TOKEN_COMMA && paren_depth == 0) {
+                small_index_vec_push(&args_begin, &args.elem_count);
+                continue;
+            }
+
+            small_token_vec_push(&args, &token);
+        }
+        if (macro->param_count != args_begin.elem_count) {
+            const struct file_loc loc = peek_token(preprocessor->context).loc;
+            log_error(preprocessor->log, &loc, "expected %zu argument(s) to macro '%s', but got %zu",
+                macro->param_count, macro->name, args_begin.elem_count);
+        }
+    }
+    small_index_vec_push(&args_begin, &args.elem_count);
+
+    for (size_t i = 0; i < macro->tokens.elem_count; ++i) {
+        struct token token = macro->tokens.elems[i];
+        if (token.tag == TOKEN_MACRO_PARAM) {
+            if (token.macro_param + 1 < args_begin.elem_count) {
+                const size_t begin = args_begin.elems[token.macro_param];
+                const size_t end   = args_begin.elems[token.macro_param + 1];
+                for (size_t j = begin; j < end; ++j) {
+                    token_vec_push(&context->macro_context.tokens, &args.elems[j]);
+                }
+            }
+            continue;
+        }
+
+        token_vec_push(&context->macro_context.tokens, &macro->tokens.elems[i]);
+    }
+    small_token_vec_destroy(&args);
+    small_index_vec_destroy(&args_begin);
+    return context;
+}
+
+static inline bool can_expand_macro(struct preprocessor* preprocessor, const struct macro* macro) {
+    struct context* context = preprocessor->context;
+    while (context && context->tag == CONTEXT_MACRO) {
+        if (context->macro_context.macro == macro)
+            return false;
+        context = context->prev;
+    }
+    return true;
+}
+
+static inline struct token expand_token(struct preprocessor* preprocessor) {
+    while (true) {
+        struct token token = read_token(preprocessor);
+        if (token.tag != TOKEN_IDENT)
+            return token;
+
+        const char* ident = str_pool_insert_view(preprocessor->str_pool, preprocessor_view(preprocessor, &token));
+        const struct macro* macro = macro_set_find(&preprocessor->macros, &(struct macro) { .name = ident });
+        if (!macro || !can_expand_macro(preprocessor, macro))
+            return token;
+
+        const bool has_args = peek_token(preprocessor->context).tag == TOKEN_LPAREN;
+        if (macro->has_params && !has_args)
+            return token;
+
+        push_context(preprocessor, expand_macro(preprocessor, macro));
+    }
 }
 
 static inline enum directive directive_from_string(struct str_view string) {
@@ -253,21 +369,21 @@ struct preprocessor* preprocessor_open(
     preprocessor->context = NULL;
     preprocessor->file_cache = file_cache;
     preprocessor->config = *config;
-    preprocessor->macros = macro_map_create();
+    preprocessor->macros = macro_set_create();
     preprocessor->mem_pool = mem_pool_create();
     preprocessor->str_pool = str_pool_create(&preprocessor->mem_pool);
 
-    push_context(preprocessor, alloc_context(NULL, source_file));
+    push_context(preprocessor, alloc_source_file_context(NULL, source_file));
     return preprocessor;
 }
 
 void preprocessor_close(struct preprocessor* preprocessor) {
     while (preprocessor->context)
         pop_context(preprocessor);
-    MAP_FOREACH_VAL(struct macro, macro, preprocessor->macros) {
-        free_macro(macro);
+    SET_FOREACH(struct macro, macro, preprocessor->macros) {
+        destroy_macro((struct macro*)macro);
     }
-    macro_map_destroy(&preprocessor->macros);
+    macro_set_destroy(&preprocessor->macros);
     str_pool_destroy(preprocessor->str_pool);
     mem_pool_destroy(&preprocessor->mem_pool);
     free(preprocessor);
@@ -306,7 +422,7 @@ static inline bool eval_cond(struct preprocessor* preprocessor, enum cond_value 
         case COND_IS_NOT_DEFINED:
         {
             const char* ident = parse_ident(preprocessor);
-            const bool is_defined = macro_map_find(&preprocessor->macros, &ident) != NULL;
+            const bool is_defined = macro_set_find(&preprocessor->macros, &(struct macro) { .name = ident }) != NULL;
             return is_defined ^ (cond_value == COND_IS_NOT_DEFINED);
         }
         case COND_TRUE:
@@ -320,14 +436,15 @@ static inline bool eval_cond(struct preprocessor* preprocessor, enum cond_value 
 }
 
 static void enter_if(struct preprocessor* preprocessor, const char* directive_name, enum cond_value cond_value) {
+    assert(preprocessor->context->tag == CONTEXT_SOURCE_FILE);
     if (!preprocessor->context->is_active) {
-        preprocessor->context->inactive_cond_depth++;
+        preprocessor->context->source_file_context.inactive_cond_depth++;
         eat_extra_tokens(preprocessor, NULL);
         return;
     }
 
     const bool is_active = eval_cond(preprocessor, cond_value);
-    cond_stack_push(&preprocessor->context->cond_stack, &(struct cond) {
+    cond_stack_push(&preprocessor->context->source_file_context.cond_stack, &(struct cond) {
         .was_active = is_active,
         .loc = preprocessor->context->line_loc
     });
@@ -336,15 +453,17 @@ static void enter_if(struct preprocessor* preprocessor, const char* directive_na
 }
 
 static inline void enter_elif(struct preprocessor* preprocessor, const char* directive_name, enum cond_value cond_value) {
-    if (preprocessor->context->inactive_cond_depth > 0) {
+    assert(preprocessor->context->tag == CONTEXT_SOURCE_FILE);
+    if (preprocessor->context->source_file_context.inactive_cond_depth > 0) {
         eat_extra_tokens(preprocessor, NULL);
         return;
     }
 
-    assert(!cond_stack_is_empty(&preprocessor->context->cond_stack));
-    struct cond* last_cond = cond_stack_last(&preprocessor->context->cond_stack);
+    assert(!cond_stack_is_empty(&preprocessor->context->source_file_context.cond_stack));
+    struct cond* last_cond = cond_stack_last(&preprocessor->context->source_file_context.cond_stack);
     if (last_cond->was_last_else)
         log_error(preprocessor->log, &preprocessor->context->line_loc, "'#%s' after '#else'", directive_name);
+
     const bool is_active = eval_cond(preprocessor, cond_value) & !last_cond->was_active;
     last_cond->was_active |= is_active;
     last_cond->was_last_else = cond_value == COND_TRUE;
@@ -375,14 +494,15 @@ static void parse_elif(struct preprocessor* preprocessor) {
 }
 
 static void parse_endif(struct preprocessor* preprocessor) {
-    if (preprocessor->context->inactive_cond_depth > 0) {
-        preprocessor->context->inactive_cond_depth--;
+    assert(preprocessor->context->tag == CONTEXT_SOURCE_FILE);
+    if (preprocessor->context->source_file_context.inactive_cond_depth > 0) {
+        preprocessor->context->source_file_context.inactive_cond_depth--;
         eat_extra_tokens(preprocessor, NULL);
         return;
     }
 
     if (!error_on_empty_cond_stack(preprocessor, "endif")) {
-        cond_stack_pop(&preprocessor->context->cond_stack);
+        cond_stack_pop(&preprocessor->context->source_file_context.cond_stack);
     }
     preprocessor->context->is_active = true;
     eat_extra_tokens(preprocessor, "endif");
@@ -415,30 +535,61 @@ static void parse_elifndef(struct preprocessor* preprocessor) {
     parse_elifdef_or_elifndef(preprocessor, true);
 }
 
+static inline size_t find_param_index(struct small_str_view_vec* params, struct str_view ident) {
+    for (size_t i = 0; i < params->elem_count; ++i) {
+        if (str_view_is_equal(&params->elems[i], &ident))
+            return i;
+    }
+    return SIZE_MAX;
+}
+
 static void parse_define(struct preprocessor* preprocessor) {
     const struct file_loc loc = peek_token(preprocessor->context).loc;
     const char* name = parse_ident(preprocessor);
-    struct macro macro = alloc_macro();
+
+    bool has_params = false;
+    struct small_str_view_vec params;
+    small_str_view_vec_init(&params);
     if (accept_token(preprocessor, TOKEN_LPAREN)) {
+        has_params = true;
         while (peek_token(preprocessor->context).tag == TOKEN_IDENT) {
-            param_vec_push(&macro.params, (const char*[]) { parse_ident(preprocessor) });
+            struct token token = read_token(preprocessor);
+            struct str_view param = preprocessor_view(preprocessor, &token);
+            small_str_view_vec_push(&params, &param);
             if (!accept_token(preprocessor, TOKEN_COMMA))
                 break;
         }
         expect_token(preprocessor, TOKEN_RPAREN);
     }
+
+    struct macro macro = {};
+    macro.tokens = token_vec_create();
+    macro.name = name;
+    macro.has_params = has_params;
+    macro.param_count = params.elem_count;
+
     struct token token;
     do {
         token = read_token(preprocessor);
+        if (token.tag == TOKEN_IDENT) {
+            size_t macro_param = find_param_index(&params, preprocessor_view(preprocessor, &token));
+            if (macro_param != SIZE_MAX) {
+                token.tag = TOKEN_MACRO_PARAM;
+                token.macro_param = macro_param;
+            }
+        }
         token_vec_push(&macro.tokens, &token);
     } while (token.tag != TOKEN_NL);
-    struct macro* existing_macro = (struct macro*)macro_map_find(&preprocessor->macros, &name);
+
+    small_str_view_vec_destroy(&params);
+
+    struct macro* existing_macro = (struct macro*)macro_set_find(&preprocessor->macros, &(struct macro) { .name = name });
     if (existing_macro) {
         log_warn(preprocessor->log, &loc, "redefinition for macro '%s'", name);
-        free_macro(existing_macro);
+        destroy_macro(existing_macro);
         *existing_macro = macro;
     } else {
-        [[maybe_unused]] bool was_inserted = macro_map_insert(&preprocessor->macros, &name, &macro);
+        [[maybe_unused]] bool was_inserted = macro_set_insert(&preprocessor->macros, &macro);
         assert(was_inserted);
     }
 }
@@ -446,12 +597,12 @@ static void parse_define(struct preprocessor* preprocessor) {
 static void parse_undef(struct preprocessor* preprocessor) {
     const struct file_loc loc = peek_token(preprocessor->context).loc;
     const char* name = parse_ident(preprocessor);
-    struct macro* macro = (struct macro*)macro_map_find(&preprocessor->macros, &name);
+    struct macro* macro = (struct macro*)macro_set_find(&preprocessor->macros, &(struct macro) { .name = name });
     if (!macro) {
         log_error(preprocessor->log, &loc, "unknown macro '%s'", name);
     } else {
-        free_macro(macro);
-        macro_map_remove(&preprocessor->macros, &name);
+        destroy_macro(macro);
+        macro_set_remove(&preprocessor->macros, &(struct macro) { .name = name });
     }
     eat_extra_tokens(preprocessor, "undef");
 }
@@ -557,8 +708,8 @@ static void print_token_error(struct log* log, const char* file_data, const stru
 struct token preprocessor_advance(struct preprocessor* preprocessor) {
     while (true) {
         bool on_new_line = preprocessor->context->on_new_line;
-        struct token token = read_token(preprocessor);
-        if (token.tag == TOKEN_HASH && on_new_line && preprocessor->context->source_file) {
+        struct token token = expand_token(preprocessor);
+        if (token.tag == TOKEN_HASH && on_new_line && preprocessor->context->tag == CONTEXT_SOURCE_FILE) {
             enum directive directive = peek_directive(preprocessor);
             if (directive != DIRECTIVE_NONE) {
                 read_token(preprocessor);
