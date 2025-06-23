@@ -9,3 +9,7 @@ int VAR_DECL(int i) { return i; }
 shader test() {
     VAR_DECL(VAR_DECL) (2);
 }
+
+#define TEST_VA_0(x, ...)
+#define TEST_VA_1(x, ...)
+#define TEST_VA_2(x, y, ...)

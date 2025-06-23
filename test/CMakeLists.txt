@@ -29,6 +29,7 @@ add_nosl_test(FILE "preprocessor/fail/unterminated_if_if_0.osl" REGEX "untermina
 add_nosl_test(FILE "preprocessor/fail/macro_redefinition.osl"   REGEX "redefinition for macro 'FOO'" ARGS --warns-as-errors)
 add_nosl_test(FILE "preprocessor/fail/error.osl"                REGEX "This should produce an error")
 add_nosl_test(FILE "preprocessor/fail/warning.osl"              REGEX "This should produce a warning" ARGS --warns-as-errors)
+add_nosl_test(FILE "preprocessor/fail/bad_macro_ellipsis.osl"   REGEX "expected '\\)', but got ','")
 
 add_nosl_test(FILE "preprocessor/pass/if_elif_else.osl")
 add_nosl_test(FILE "preprocessor/pass/warning.osl")

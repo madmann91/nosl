@@ -45,6 +45,7 @@ struct cond {
 
 struct macro {
     bool has_params;
+    bool has_ellipsis;
     size_t param_count;
     const char* name;
     struct token_vec tokens;
@@ -548,6 +549,7 @@ static void parse_define(struct preprocessor* preprocessor) {
     const char* name = parse_ident(preprocessor);
 
     bool has_params = false;
+    bool has_ellipsis = false;
     struct small_str_view_vec params;
     small_str_view_vec_init(&params);
     if (accept_token(preprocessor, TOKEN_LPAREN)) {
@@ -559,6 +561,7 @@ static void parse_define(struct preprocessor* preprocessor) {
             if (!accept_token(preprocessor, TOKEN_COMMA))
                 break;
         }
+        has_ellipsis |= accept_token(preprocessor, TOKEN_ELLIPSIS);
         expect_token(preprocessor, TOKEN_RPAREN);
     }
 
@@ -566,6 +569,7 @@ static void parse_define(struct preprocessor* preprocessor) {
     macro.tokens = token_vec_create();
     macro.name = name;
     macro.has_params = has_params;
+    macro.has_ellipsis = has_ellipsis;
     macro.param_count = params.elem_count;
 
     struct token token;
