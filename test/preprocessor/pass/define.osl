@@ -1,5 +1,11 @@
-#define DECL(name, x) __attribute__((name)) int foo x
+#define FUNC_DECL(name, x) __attribute__((name)) int foo x
 #define A B
 #define B A
 #define C A
-DECL(always_inline, (int x, int y)) { int A = 1; return C; }
+FUNC_DECL(always_inline, (int x, int y)) { int A = 1; return C; }
+
+int VAR_DECL(int i) { return i; }
+#define VAR_DECL(x) int y = x
+shader test() {
+    VAR_DECL(VAR_DECL) (2);
+}
