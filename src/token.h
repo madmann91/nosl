@@ -129,7 +129,7 @@ struct token {
         int_literal int_literal;
         float_literal float_literal;
         enum token_error error;
-        size_t macro_param;
+        size_t macro_param_index;
     };
 };
 

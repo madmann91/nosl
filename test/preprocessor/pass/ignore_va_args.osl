@@ -1,0 +1,10 @@
+#define TEST(x) __VA_ARGS__
+
+int f() {
+    int TEST(1) = 0;
+    return __VA_ARGS__;
+}
+
+shader foo() {
+    int i = f();
+}

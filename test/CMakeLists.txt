@@ -30,6 +30,8 @@ add_nosl_test(FILE "preprocessor/fail/macro_redefinition.osl"   REGEX "redefinit
 add_nosl_test(FILE "preprocessor/fail/error.osl"                REGEX "This should produce an error")
 add_nosl_test(FILE "preprocessor/fail/warning.osl"              REGEX "This should produce a warning" ARGS --warns-as-errors)
 add_nosl_test(FILE "preprocessor/fail/bad_macro_ellipsis.osl"   REGEX "expected '\\)', but got ','")
+add_nosl_test(FILE "preprocessor/fail/bad_va_args.osl"          REGEX "'__VA_ARGS__' is only allowed inside variadic macros" ARGS --warns-as-errors)
+add_nosl_test(FILE "preprocessor/fail/too_many_args.osl"        REGEX "expected 1 argument\\(s\\) to macro 'TEST', but got 2")
 
 add_nosl_test(FILE "preprocessor/pass/if_elif_else.osl")
 add_nosl_test(FILE "preprocessor/pass/warning.osl")
@@ -38,6 +40,8 @@ add_nosl_test(FILE "preprocessor/pass/pragma.osl")
 add_nosl_test(FILE "preprocessor/pass/undef.osl")
 
 add_nosl_test(FILE "preprocessor/pass/define.osl")
+add_nosl_test(FILE "preprocessor/pass/variadic_macros.osl")
+add_nosl_test(FILE "preprocessor/pass/ignore_va_args.osl")
 
 # Frontend Tests ----------------------------------------------------------------------------------
 
@@ -58,6 +62,7 @@ add_nosl_test(FILE "frontend/pass/components.osl")
 # Tests that need the builtin library to work
 #add_nosl_test(FILE "frontend/pass/loops.osl")
 
+add_nosl_test(FILE "frontend/fail/trailing_comma.osl"           REGEX "expected '\\)'")
 add_nosl_test(FILE "frontend/fail/missing_default_value.osl"    REGEX "expected '='")
 add_nosl_test(FILE "frontend/fail/invalid_break.osl"            REGEX "'break' is not allowed outside of loops")
 add_nosl_test(FILE "frontend/fail/invalid_continue.osl"         REGEX "'continue' is not allowed outside of loops")

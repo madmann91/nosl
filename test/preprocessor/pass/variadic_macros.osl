@@ -1,0 +1,16 @@
+#define TEST_VA_0(...) f(__VA_ARGS__)
+#define TEST_VA_1(x, ...) f(x, __VA_ARGS__)
+#define TEST_VA_2(x, y, ...) f(x, y, __VA_ARGS__)
+
+int f() {}
+int f(int x) {}
+int f(int x, int y) {}
+int f(int x, int y, int z) {}
+
+shader foo() {
+    TEST_VA_0(1);
+    TEST_VA_0(1, 2);
+    TEST_VA_1(1, 2);
+    TEST_VA_1(1, 2, 3);
+    TEST_VA_2(1, 2, 3);
+}

@@ -6,10 +6,8 @@ FUNC_DECL(always_inline, (int x, int y)) { int A = 1; return C; }
 
 int VAR_DECL(int i) { return i; }
 #define VAR_DECL(x) int y = x
+
 shader test() {
+    foo(1, 2);
     VAR_DECL(VAR_DECL) (2);
 }
-
-#define TEST_VA_0(x, ...)
-#define TEST_VA_1(x, ...)
-#define TEST_VA_2(x, y, ...)

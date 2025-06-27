@@ -1,0 +1,3 @@
+#define TEST(x)
+TEST(1, 2)
+shader foo() {}

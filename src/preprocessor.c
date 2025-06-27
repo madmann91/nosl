@@ -45,10 +45,11 @@ struct cond {
 
 struct macro {
     bool has_params;
-    bool has_ellipsis;
+    bool is_variadic;
     size_t param_count;
     const char* name;
     struct token_vec tokens;
+    struct file_loc loc;
 };
 
 enum directive {
@@ -89,15 +90,15 @@ struct context {
     };
 };
 
-static inline uint32_t hash_macro_name(uint32_t h, const struct macro* macro) {
-    return hash_uint64(h, (uint64_t)macro->name);
+static inline uint32_t hash_macro_name(uint32_t h, struct macro* const* macro) {
+    return hash_uint64(h, (uint64_t)(*macro)->name);
 }
 
-static inline bool is_macro_name_equal(const struct macro* macro, const struct macro* other_macro) {
-    return macro->name == other_macro->name;
+static inline bool is_macro_name_equal(struct macro* const* macro, struct macro* const* other_macro) {
+    return (*macro)->name == (*other_macro)->name;
 }
 
-SET_DEFINE(macro_set, struct macro, hash_macro_name, is_macro_name_equal, PRIVATE)
+SET_DEFINE(macro_set, struct macro*, hash_macro_name, is_macro_name_equal, PRIVATE)
 
 struct preprocessor {
     struct log* log;
@@ -109,9 +110,35 @@ struct preprocessor {
     struct mem_pool mem_pool;
 };
 
-static inline void destroy_macro(struct macro* macro) {
+static inline void cleanup_macro(struct macro* macro) {
     token_vec_destroy(&macro->tokens);
     memset(macro, 0, sizeof(struct macro));
+}
+
+static inline void free_macro(struct macro* macro) {
+    cleanup_macro(macro);
+    free(macro);
+}
+
+static inline struct macro* find_macro(struct preprocessor* preprocessor, const char* name) {
+    struct macro* macro_ptr = &(struct macro) { .name = name };
+    struct macro* const* macro = macro_set_find(&preprocessor->macros, &macro_ptr);
+    return macro ? *macro : NULL;
+}
+
+static inline void insert_macro(struct preprocessor* preprocessor, const struct macro* macro) {
+    struct macro* existing_macro = find_macro(preprocessor, macro->name);
+    if (existing_macro) {
+        log_warn(preprocessor->log, &macro->loc, "redefinition for macro '%s'", macro->name);
+        log_note(preprocessor->log, &existing_macro->loc, "previously declared here");
+        cleanup_macro(existing_macro);
+        *existing_macro = *macro;
+    } else {
+        struct macro* new_macro = xcalloc(1, sizeof(struct macro));
+        *new_macro = *macro;
+        [[maybe_unused]] bool was_inserted = macro_set_insert(&preprocessor->macros, &new_macro);
+        assert(was_inserted);
+    }
 }
 
 static inline struct context* alloc_context(struct context* prev) {
@@ -236,17 +263,23 @@ static inline bool expect_token(struct preprocessor* preprocessor, enum token_ta
     return true;
 }
 
-static inline struct context* expand_macro(struct preprocessor* preprocessor, const struct macro* macro) {
+static inline struct context* expand_macro(
+    struct preprocessor* preprocessor,
+    const struct macro* macro,
+    const struct file_loc* loc)
+{
     struct context* context = alloc_macro_context(preprocessor->context, macro);
 
     struct small_token_vec args;
-    struct small_index_vec args_begin;
+    struct small_index_vec arg_indices;
     small_token_vec_init(&args);
-    small_index_vec_init(&args_begin);
-    small_index_vec_push(&args_begin, &args.elem_count);
-    if (macro->has_params > 0) {
+    small_index_vec_init(&arg_indices);
+
+    if (macro->has_params) {
         eat_token(preprocessor, TOKEN_LPAREN);
         size_t paren_depth = 0;
+
+        small_index_vec_push(&arg_indices, &args.elem_count);
         while (true) {
             struct token token = read_token(preprocessor);
             if (token.tag == TOKEN_EOF) {
@@ -258,42 +291,48 @@ static inline struct context* expand_macro(struct preprocessor* preprocessor, co
                 paren_depth--;
             } else if (token.tag == TOKEN_LPAREN) {
                 paren_depth++;
-            } else if (token.tag == TOKEN_COMMA && paren_depth == 0) {
-                small_index_vec_push(&args_begin, &args.elem_count);
+            } else if (token.tag == TOKEN_COMMA && paren_depth == 0 && arg_indices.elem_count <= macro->param_count) {
+                // Everything after the regular macro arguments belongs to __VA_ARG__, including commas.
+                small_index_vec_push(&arg_indices, &args.elem_count);
                 continue;
             }
 
             small_token_vec_push(&args, &token);
         }
-        if (macro->param_count != args_begin.elem_count) {
-            const struct file_loc loc = peek_token(preprocessor->context).loc;
-            log_error(preprocessor->log, &loc, "expected %zu argument(s) to macro '%s', but got %zu",
-                macro->param_count, macro->name, args_begin.elem_count);
-        }
     }
-    small_index_vec_push(&args_begin, &args.elem_count);
+
+    // Place sentinel to simplify the code below.
+    const size_t arg_count = arg_indices.elem_count;
+    small_index_vec_push(&arg_indices, &args.elem_count);
+
+    if (macro->param_count > arg_count || (!macro->is_variadic && macro->param_count != arg_count)) {
+        log_error(preprocessor->log, loc, "expected %zu argument(s) to macro '%s', but got %zu",
+            macro->param_count, macro->name, arg_count);
+    }
 
     for (size_t i = 0; i < macro->tokens.elem_count; ++i) {
         struct token token = macro->tokens.elems[i];
         if (token.tag == TOKEN_MACRO_PARAM) {
-            if (token.macro_param + 1 < args_begin.elem_count) {
-                const size_t begin = args_begin.elems[token.macro_param];
-                const size_t end   = args_begin.elems[token.macro_param + 1];
-                for (size_t j = begin; j < end; ++j) {
-                    token_vec_push(&context->macro_context.tokens, &args.elems[j]);
-                }
-            }
-            continue;
-        }
+            // May happen if the error above triggered, or in the absence of an argument for
+            // '__VA_ARGS__', in which case we just skip this parameter.
+            if (token.macro_param_index >= arg_count)
+                continue;
 
-        token_vec_push(&context->macro_context.tokens, &macro->tokens.elems[i]);
+            const size_t begin = arg_indices.elems[token.macro_param_index];
+            const size_t end   = arg_indices.elems[token.macro_param_index + 1];
+            for (size_t j = begin; j < end; ++j)
+                token_vec_push(&context->macro_context.tokens, &args.elems[j]);
+        } else {
+            token_vec_push(&context->macro_context.tokens, &macro->tokens.elems[i]);
+        }
     }
     small_token_vec_destroy(&args);
-    small_index_vec_destroy(&args_begin);
+    small_index_vec_destroy(&arg_indices);
     return context;
 }
 
 static inline bool can_expand_macro(struct preprocessor* preprocessor, const struct macro* macro) {
+    // Make sure we do not allow recursive macro expansion
     struct context* context = preprocessor->context;
     while (context && context->tag == CONTEXT_MACRO) {
         if (context->macro_context.macro == macro)
@@ -310,7 +349,7 @@ static inline struct token expand_token(struct preprocessor* preprocessor) {
             return token;
 
         const char* ident = str_pool_insert_view(preprocessor->str_pool, preprocessor_view(preprocessor, &token));
-        const struct macro* macro = macro_set_find(&preprocessor->macros, &(struct macro) { .name = ident });
+        const struct macro* macro = find_macro(preprocessor, ident);
         if (!macro || !can_expand_macro(preprocessor, macro))
             return token;
 
@@ -318,7 +357,7 @@ static inline struct token expand_token(struct preprocessor* preprocessor) {
         if (macro->has_params && !has_args)
             return token;
 
-        push_context(preprocessor, expand_macro(preprocessor, macro));
+        push_context(preprocessor, expand_macro(preprocessor, macro, &token.loc));
     }
 }
 
@@ -381,8 +420,8 @@ struct preprocessor* preprocessor_open(
 void preprocessor_close(struct preprocessor* preprocessor) {
     while (preprocessor->context)
         pop_context(preprocessor);
-    SET_FOREACH(struct macro, macro, preprocessor->macros) {
-        destroy_macro((struct macro*)macro);
+    SET_FOREACH(struct macro*, macro, preprocessor->macros) {
+        free_macro(*macro);
     }
     macro_set_destroy(&preprocessor->macros);
     str_pool_destroy(preprocessor->str_pool);
@@ -423,7 +462,7 @@ static inline bool eval_cond(struct preprocessor* preprocessor, enum cond_value 
         case COND_IS_NOT_DEFINED:
         {
             const char* ident = parse_ident(preprocessor);
-            const bool is_defined = macro_set_find(&preprocessor->macros, &(struct macro) { .name = ident }) != NULL;
+            const bool is_defined = find_macro(preprocessor, ident) != NULL;
             return is_defined ^ (cond_value == COND_IS_NOT_DEFINED);
         }
         case COND_TRUE:
@@ -536,7 +575,21 @@ static void parse_elifndef(struct preprocessor* preprocessor) {
     parse_elifdef_or_elifndef(preprocessor, true);
 }
 
-static inline size_t find_param_index(struct small_str_view_vec* params, struct str_view ident) {
+static inline size_t find_macro_param_index(
+    struct preprocessor* preprocessor,
+    const struct small_str_view_vec* params,
+    const struct token* token,
+    bool is_variadic)
+{
+    struct str_view ident = preprocessor_view(preprocessor, token);
+    if (str_view_is_equal(&ident, &STR_VIEW("__VA_ARGS__"))) {
+        if (!is_variadic) {
+            log_warn(preprocessor->log, &token->loc, "'__VA_ARGS__' is only allowed inside variadic macros");
+            return SIZE_MAX;
+        }
+        return params->elem_count;
+    }
+
     for (size_t i = 0; i < params->elem_count; ++i) {
         if (str_view_is_equal(&params->elems[i], &ident))
             return i;
@@ -545,11 +598,10 @@ static inline size_t find_param_index(struct small_str_view_vec* params, struct 
 }
 
 static void parse_define(struct preprocessor* preprocessor) {
-    const struct file_loc loc = peek_token(preprocessor->context).loc;
     const char* name = parse_ident(preprocessor);
 
     bool has_params = false;
-    bool has_ellipsis = false;
+    bool is_variadic = false;
     struct small_str_view_vec params;
     small_str_view_vec_init(&params);
     if (accept_token(preprocessor, TOKEN_LPAREN)) {
@@ -561,52 +613,44 @@ static void parse_define(struct preprocessor* preprocessor) {
             if (!accept_token(preprocessor, TOKEN_COMMA))
                 break;
         }
-        has_ellipsis |= accept_token(preprocessor, TOKEN_ELLIPSIS);
+        is_variadic |= accept_token(preprocessor, TOKEN_ELLIPSIS);
         expect_token(preprocessor, TOKEN_RPAREN);
     }
 
-    struct macro macro = {};
-    macro.tokens = token_vec_create();
-    macro.name = name;
-    macro.has_params = has_params;
-    macro.has_ellipsis = has_ellipsis;
-    macro.param_count = params.elem_count;
+    struct macro macro = {
+        .tokens = token_vec_create(),
+        .name = name,
+        .has_params = has_params,
+        .is_variadic = is_variadic,
+        .param_count = params.elem_count
+    };
 
     struct token token;
     do {
         token = read_token(preprocessor);
         if (token.tag == TOKEN_IDENT) {
-            size_t macro_param = find_param_index(&params, preprocessor_view(preprocessor, &token));
-            if (macro_param != SIZE_MAX) {
+            const size_t macro_param_index = find_macro_param_index(preprocessor, &params, &token, is_variadic);
+            if (macro_param_index != SIZE_MAX) {
                 token.tag = TOKEN_MACRO_PARAM;
-                token.macro_param = macro_param;
+                token.macro_param_index = macro_param_index;
             }
         }
         token_vec_push(&macro.tokens, &token);
     } while (token.tag != TOKEN_NL);
-
     small_str_view_vec_destroy(&params);
 
-    struct macro* existing_macro = (struct macro*)macro_set_find(&preprocessor->macros, &(struct macro) { .name = name });
-    if (existing_macro) {
-        log_warn(preprocessor->log, &loc, "redefinition for macro '%s'", name);
-        destroy_macro(existing_macro);
-        *existing_macro = macro;
-    } else {
-        [[maybe_unused]] bool was_inserted = macro_set_insert(&preprocessor->macros, &macro);
-        assert(was_inserted);
-    }
+    insert_macro(preprocessor, &macro);
 }
 
 static void parse_undef(struct preprocessor* preprocessor) {
     const struct file_loc loc = peek_token(preprocessor->context).loc;
     const char* name = parse_ident(preprocessor);
-    struct macro* macro = (struct macro*)macro_set_find(&preprocessor->macros, &(struct macro) { .name = name });
+    struct macro* macro = find_macro(preprocessor, name);
     if (!macro) {
         log_error(preprocessor->log, &loc, "unknown macro '%s'", name);
     } else {
-        destroy_macro(macro);
-        macro_set_remove(&preprocessor->macros, &(struct macro) { .name = name });
+        macro_set_remove(&preprocessor->macros, &macro);
+        free_macro(macro);
     }
     eat_extra_tokens(preprocessor, "undef");
 }
