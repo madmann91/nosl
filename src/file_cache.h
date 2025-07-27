@@ -17,3 +17,4 @@ struct file_cache;
 void file_cache_destroy(struct file_cache*);
 [[nodiscard]] struct source_file* file_cache_find(const struct file_cache*, const char*);
 struct source_file* file_cache_insert(struct file_cache*, const char*);
+struct source_file* file_cache_insert_canonical(struct file_cache*, const char*);

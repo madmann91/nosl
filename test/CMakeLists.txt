@@ -12,7 +12,7 @@ function (add_nosl_test)
     endif()
     add_test(
         NAME ${add_nosl_test_arg_FILE}
-        COMMAND noslc ${add_nosl_test_arg_FILE} ${add_nosl_test_ARGS}
+        COMMAND noslc ${add_nosl_test_arg_FILE} ${add_nosl_test_arg_ARGS}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     if (NOT ${add_nosl_test_arg_REGEX} STREQUAL "")
         set_tests_properties(${add_nosl_test_arg_FILE} PROPERTIES PASS_REGULAR_EXPRESSION "${add_nosl_test_arg_REGEX}")
@@ -38,6 +38,7 @@ add_nosl_test(FILE "preprocessor/pass/warning.osl")
 add_nosl_test(FILE "preprocessor/pass/line.osl")
 add_nosl_test(FILE "preprocessor/pass/pragma.osl")
 add_nosl_test(FILE "preprocessor/pass/undef.osl")
+add_nosl_test(FILE "preprocessor/pass/include.osl" ARGS -I ${PROJECT_SOURCE_DIR})
 
 add_nosl_test(FILE "preprocessor/pass/define.osl")
 add_nosl_test(FILE "preprocessor/pass/variadic_macros.osl")

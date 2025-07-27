@@ -49,7 +49,7 @@ static inline bool accept_token(struct parser* parser, enum token_tag tag) {
 
 static inline bool expect_token(struct parser* parser, enum token_tag tag) {
     if (!accept_token(parser, tag)) {
-        struct str_view str_view = preprocessor_view(parser->preprocessor, parser->ahead);
+        struct str_view str_view = preprocessor_view(parser->preprocessor, &parser->ahead->loc);
         log_error(parser->log,
             &parser->ahead->loc,
             "expected '%s', but got '%.*s'",
@@ -88,7 +88,7 @@ static inline struct ast* alloc_ast(
 }
 
 static const char* parse_ident(struct parser* parser) {
-    struct str_view str_view = preprocessor_view(parser->preprocessor, parser->ahead);
+    struct str_view str_view = preprocessor_view(parser->preprocessor, &parser->ahead->loc);
     char* name = mem_pool_alloc(parser->mem_pool, str_view.length + 1, alignof(char));
     xmemcpy(name, str_view.data, str_view.length);
     name[str_view.length] = 0;
@@ -118,7 +118,7 @@ static struct ast* parse_many(
 
 static struct ast* parse_error(struct parser* parser, const char* msg) {
     struct file_loc begin_loc = parser->ahead->loc;
-    struct str_view str_view = preprocessor_view(parser->preprocessor, parser->ahead);
+    struct str_view str_view = preprocessor_view(parser->preprocessor, &parser->ahead->loc);
     log_error(parser->log,
         &parser->ahead->loc,
         "expected %s, but got '%.*s'",
@@ -186,7 +186,7 @@ static struct ast* parse_string_literal(struct parser* parser) {
     struct file_loc begin_loc = parser->ahead->loc;
     struct str str = str_create();
     while (parser->ahead->tag == TOKEN_STRING_LITERAL) {
-        str_append(&str, str_view_shrink(preprocessor_view(parser->preprocessor, parser->ahead), 1, 1));
+        str_append(&str, str_view_shrink(preprocessor_view(parser->preprocessor, &parser->ahead->loc), 1, 1));
         eat_token(parser, TOKEN_STRING_LITERAL);
     }
     char* string_literal = mem_pool_alloc(parser->mem_pool, str.length + 1, alignof(char));

@@ -19,4 +19,4 @@ struct preprocessor_config {
 
 void preprocessor_close(struct preprocessor*);
 struct token preprocessor_advance(struct preprocessor*);
-struct str_view preprocessor_view(struct preprocessor*, const struct token*);
+struct str_view preprocessor_view(struct preprocessor*, const struct file_loc*);

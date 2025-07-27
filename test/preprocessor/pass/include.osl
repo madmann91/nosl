@@ -1,0 +1,7 @@
+#include "include/test1.inc"
+#include <test/preprocessor/pass/include/test2.inc>
+
+shader main() {
+    int i = foo();
+    int j = bar();
+}
