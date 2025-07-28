@@ -159,6 +159,12 @@ struct token lexer_advance(struct lexer* lexer) {
         if (accept_char(lexer, '?' )) return make_token(lexer, &begin_pos, TOKEN_QUESTION);
         if (accept_char(lexer, ':' )) return make_token(lexer, &begin_pos, TOKEN_COLON);
 
+        if (accept_char(lexer, '\\')) {
+            if (accept_char(lexer, '\n'))
+                continue;
+            return make_token(lexer, &begin_pos, TOKEN_BACKSLASH);
+        }
+
         if (accept_char(lexer, '#' )) {
             if (accept_char(lexer, '#'))
                 return make_token(lexer, &begin_pos, TOKEN_CONCAT);

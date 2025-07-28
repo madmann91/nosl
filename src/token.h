@@ -93,7 +93,8 @@
     x(XOR_EQ, "^=",) \
     x(LSHIFT_EQ, "<<=",) \
     x(RSHIFT_EQ, ">>=",) \
-    x(ELLIPSIS, "...",)
+    x(ELLIPSIS, "...",) \
+    x(BACKSLASH, "\\")
 
 #define TOKEN_LIST(x) \
     SYMBOL_LIST(x) \
