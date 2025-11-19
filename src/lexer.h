@@ -1,15 +1,21 @@
 #pragma once
 
 #include <overture/log.h>
+#include <overture/str.h>
 
 #include "token.h"
 
-struct lexer {
-    const char* file_data;
-    const char* file_name;
+struct lexer_pos {
     struct source_pos source_pos;
-    size_t bytes_left;
+    size_t bytes_read;
 };
 
-[[nodiscard]] struct lexer lexer_create(const char* file_name, const char* file_data, size_t file_size);
+struct lexer {
+    struct str_view file_name;
+    struct str_view file_data;
+    struct lexer_pos pos;
+    bool on_new_line;
+};
+
+[[nodiscard]] struct lexer lexer_create(struct str_view file_name, struct str_view file_data);
 struct token lexer_advance(struct lexer*);

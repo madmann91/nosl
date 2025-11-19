@@ -1,7 +1,6 @@
 #include "parse.h"
 #include "check.h"
 #include "type_table.h"
-#include "file_cache.h"
 #include "preprocessor.h"
 #include "ast.h"
 #include "builtins.h"
@@ -79,7 +78,6 @@ static struct cli_option cli_option_multi_strings(
 static bool compile_file(
     const char* file_name,
     struct type_table* type_table,
-    struct file_cache* file_cache,
     const struct builtins* builtins,
     const struct options* options)
 {
@@ -88,16 +86,10 @@ static bool compile_file(
         .disable_colors = options->disable_colors || !is_term(stderr),
         .warns_as_errors = options->warns_as_errors,
         .max_warns = options->max_warns,
-        .max_errors = options->max_errors,
-        .print_line = log_print_line
+        .max_errors = options->max_errors
     };
 
-    struct preprocessor_config preprocessor_config = {
-        .include_paths = (const char* const*)options->include_dirs.elems,
-        .include_path_count = options->include_dirs.elem_count
-    };
-
-    struct preprocessor* preprocessor = preprocessor_open(&log, file_name, file_cache, &preprocessor_config);
+    struct preprocessor* preprocessor = preprocessor_open(&log, file_name, (const char* const*)options->include_dirs.elems);
     if (!preprocessor) {
         log_error(&log, NULL, "cannot open '%s'\n", file_name);
         return false;
@@ -135,6 +127,7 @@ static bool parse_options(int argc, char** argv, struct options* options) {
         return false;
     if (options->max_errors < 2)
         options->max_errors = 2;
+    raw_str_vec_push(&options->include_dirs, (char*[]) { NULL });
     return true;
 }
 
@@ -148,18 +141,16 @@ int main(int argc, char** argv) {
     struct mem_pool mem_pool = mem_pool_create();
     struct type_table* type_table = type_table_create(&mem_pool);
     struct builtins* builtins = builtins_create(type_table);
-    struct file_cache* file_cache = file_cache_create();
 
     bool status = true;
     size_t file_count = 0;
     for (int i = 1; i < argc; ++i) {
         if (!argv[i])
             continue;
-        status &= compile_file(argv[i], type_table, file_cache, builtins, &options);
+        status &= compile_file(argv[i], type_table, builtins, &options);
         file_count++;
     }
 
-    file_cache_destroy(file_cache);
     builtins_destroy(builtins);
     type_table_destroy(type_table);
     mem_pool_destroy(&mem_pool);

@@ -97,16 +97,16 @@
     x(BACKSLASH, "\\")
 
 #define TOKEN_LIST(x) \
-    SYMBOL_LIST(x) \
-    KEYWORD_LIST(x) \
+    x(ERROR, "<invalid token>",) \
     x(NL, "<new line>",) \
     x(EOF, "<end-of-file>",) \
     x(IDENT, "<identifier>",) \
-    x(ERROR, "<invalid token>",) \
     x(INT_LITERAL, "<integer literal>",) \
     x(FLOAT_LITERAL, "<floating-point literal>",) \
     x(STRING_LITERAL, "<string literal>",) \
-    x(MACRO_PARAM, "<macro parameter>",)
+    x(MACRO_PARAM, "<macro parameter>",) \
+    SYMBOL_LIST(x) \
+    KEYWORD_LIST(x)
 
 enum token_tag {
 #define x(tag, ...) TOKEN_##tag,
@@ -125,11 +125,14 @@ enum token_error {
 
 struct token {
     enum token_tag tag;
+    bool on_new_line;
     struct file_loc loc;
+    struct str_view contents;
     union {
         int_literal int_literal;
         float_literal float_literal;
         enum token_error error;
+        struct str_view string_literal;
         size_t macro_param_index;
     };
 };
@@ -137,9 +140,9 @@ struct token {
 VEC_DECL(token_vec, struct token, PUBLIC)
 SMALL_VEC_DECL(small_token_vec, struct token, PUBLIC)
 
-[[nodiscard]] struct str_view token_view(const struct token*, const char* file_data);
-[[nodiscard]] struct str_view token_string_literal_view(const struct token*, const char* file_data);
-
 [[nodiscard]] const char* token_tag_to_string(enum token_tag);
 [[nodiscard]] bool token_tag_is_symbol(enum token_tag);
 [[nodiscard]] bool token_tag_is_keyword(enum token_tag);
+
+[[nodiscard]] struct token token_concat(const struct token*, const struct token*);
+[[nodiscard]] struct token token_stringify(const struct token*);

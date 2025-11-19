@@ -1,0 +1,5 @@
+#define STR(x) #x
+
+shader foo() {
+    string s = STR(1);
+}

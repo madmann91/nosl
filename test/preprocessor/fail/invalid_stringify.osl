@@ -1,0 +1,2 @@
+#define STR(x) #1
+#define STR2(...) #__VA_ARGS__

@@ -16,8 +16,8 @@
 struct parser {
     struct token ahead[TOKENS_AHEAD];
     struct token behind[TOKENS_BEHIND];
-    struct mem_pool* mem_pool;
     struct preprocessor* preprocessor;
+    struct mem_pool* mem_pool;
     struct log* log;
 };
 
@@ -49,12 +49,11 @@ static inline bool accept_token(struct parser* parser, enum token_tag tag) {
 
 static inline bool expect_token(struct parser* parser, enum token_tag tag) {
     if (!accept_token(parser, tag)) {
-        struct str_view str_view = preprocessor_view(parser->preprocessor, &parser->ahead->loc);
         log_error(parser->log,
             &parser->ahead->loc,
             "expected '%s', but got '%.*s'",
             token_tag_to_string(tag),
-            (int)str_view.length, str_view.data);
+            (int)parser->ahead->contents.length, parser->ahead->contents.data);
         return false;
     }
     return true;
@@ -71,7 +70,7 @@ static inline struct ast* alloc_ast(
     struct file_loc* end_loc = &parser->behind->loc;
     const bool is_after = end_loc->end.row > begin_loc->begin.row ||
         (end_loc->end.row == begin_loc->begin.row && end_loc->end.col >= begin_loc->begin.col);
-    const bool is_same_file = !strcmp(end_loc->file_name, begin_loc->file_name);
+    const bool is_same_file = str_view_is_equal(&end_loc->file_name, &begin_loc->file_name);
 
     copy->loc.file_name = begin_loc->file_name;
     copy->loc.begin = begin_loc->begin;
@@ -88,10 +87,10 @@ static inline struct ast* alloc_ast(
 }
 
 static const char* parse_ident(struct parser* parser) {
-    struct str_view str_view = preprocessor_view(parser->preprocessor, &parser->ahead->loc);
-    char* name = mem_pool_alloc(parser->mem_pool, str_view.length + 1, alignof(char));
-    xmemcpy(name, str_view.data, str_view.length);
-    name[str_view.length] = 0;
+    struct str_view contents  = parser->ahead->contents;
+    char* name = mem_pool_alloc(parser->mem_pool, contents.length + 1, alignof(char));
+    xmemcpy(name, contents.data, contents.length);
+    name[contents.length] = 0;
     expect_token(parser, TOKEN_IDENT);
     return name;
 }
@@ -118,11 +117,10 @@ static struct ast* parse_many(
 
 static struct ast* parse_error(struct parser* parser, const char* msg) {
     struct file_loc begin_loc = parser->ahead->loc;
-    struct str_view str_view = preprocessor_view(parser->preprocessor, &parser->ahead->loc);
     log_error(parser->log,
         &parser->ahead->loc,
         "expected %s, but got '%.*s'",
-        msg, (int)str_view.length, str_view.data);
+        msg, (int)parser->ahead->contents.length, parser->ahead->contents.data);
     read_token(parser);
     return alloc_ast(parser, &begin_loc, &(struct ast) { .tag = AST_ERROR });
 }
@@ -186,7 +184,7 @@ static struct ast* parse_string_literal(struct parser* parser) {
     struct file_loc begin_loc = parser->ahead->loc;
     struct str str = str_create();
     while (parser->ahead->tag == TOKEN_STRING_LITERAL) {
-        str_append(&str, str_view_shrink(preprocessor_view(parser->preprocessor, &parser->ahead->loc), 1, 1));
+        str_append(&str, parser->ahead->string_literal);
         eat_token(parser, TOKEN_STRING_LITERAL);
     }
     char* string_literal = mem_pool_alloc(parser->mem_pool, str.length + 1, alignof(char));

@@ -33,6 +33,11 @@ add_nosl_test(FILE "preprocessor/fail/bad_macro_ellipsis.osl"   REGEX "expected 
 add_nosl_test(FILE "preprocessor/fail/bad_va_args.osl"          REGEX "'__VA_ARGS__' is only allowed inside variadic macros" ARGS --warns-as-errors)
 add_nosl_test(FILE "preprocessor/fail/too_many_args.osl"        REGEX "expected 1 argument\\(s\\) to macro 'TEST', but got 2")
 
+add_nosl_test(FILE "preprocessor/fail/invalid_stringify.osl"
+    REGEX "\
+stringification operator '#' must be followed by a macro parameter.*\
+stringification operator '#' must be followed by a macro parameter")
+
 add_nosl_test(FILE "preprocessor/pass/if_elif_else.osl")
 add_nosl_test(FILE "preprocessor/pass/warning.osl")
 add_nosl_test(FILE "preprocessor/pass/line.osl")
@@ -43,6 +48,7 @@ add_nosl_test(FILE "preprocessor/pass/include.osl" ARGS -I ${PROJECT_SOURCE_DIR}
 add_nosl_test(FILE "preprocessor/pass/define.osl")
 add_nosl_test(FILE "preprocessor/pass/variadic_macros.osl")
 add_nosl_test(FILE "preprocessor/pass/ignore_va_args.osl")
+add_nosl_test(FILE "preprocessor/pass/stringify.osl")
 
 # Frontend Tests ----------------------------------------------------------------------------------
 

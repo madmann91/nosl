@@ -89,8 +89,7 @@ static inline void report_invalid_type_with_msg(
 }
 
 static inline void report_previous_location(struct type_checker* type_checker, struct file_loc* loc) {
-    if (loc->file_name)
-        log_note(type_checker->log, loc, "previously declared here");
+    log_note(type_checker->log, loc, "previously declared here");
 }
 
 static inline void report_overload_error(

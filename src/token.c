@@ -5,21 +5,6 @@
 VEC_IMPL(token_vec, struct token, PUBLIC)
 SMALL_VEC_IMPL(small_token_vec, struct token, PUBLIC)
 
-struct str_view token_view(const struct token* token, const char* file_data) {
-    return file_loc_view(&token->loc, file_data);
-}
-
-struct str_view token_string_literal_view(const struct token* token, const char* file_data) {
-    assert(token->tag == TOKEN_STRING_LITERAL);
-    struct str_view str_view = token_view(token, file_data);
-    if (str_view.length != 0 && str_view.data[0] == '\"') {
-        assert(str_view.data[str_view.length - 1] == '\"');
-        str_view.data += 1;
-        str_view.length -= 2;
-    }
-    return str_view;
-}
-
 const char* token_tag_to_string(enum token_tag tag) {
     switch (tag) {
 #define x(tag, str, ...) case TOKEN_##tag: return str;
@@ -51,4 +36,21 @@ bool token_tag_is_keyword(enum token_tag tag) {
         default:
             return false;
     }
+}
+
+struct token token_concat(const struct token* left, const struct token* right) {
+    if (token_tag_is_keyword(left->tag) || left->tag == TOKEN_IDENT) {
+        // Accept numbers, identifiers, or keywords
+        if (token_tag_is_keyword(right->tag) || right->tag == TOKEN_IDENT || right->tag == TOKEN_INT_LITERAL) {
+            // The result may be a keyword, or an identifier
+        }
+    }
+}
+
+struct token token_stringify(const struct token* token) {
+    return (struct token) {
+        .tag = TOKEN_STRING_LITERAL,
+        .loc = token->loc,
+        .string_literal = token->contents
+    };
 }

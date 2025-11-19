@@ -4,38 +4,36 @@
 #include <ctype.h>
 #include <inttypes.h>
 
-struct lexer lexer_create(const char* file_name, const char* file_data, size_t size) {
+struct lexer lexer_create(struct str_view file_name, struct str_view file_data) {
     return (struct lexer) {
+        .file_name = file_name,
         .file_data = file_data,
-        .bytes_left = size,
-        .source_pos = { .row = 1, .col = 1, .bytes = 0 },
-        .file_name = file_name
+        .on_new_line = true,
+        .pos.source_pos = { .row = 1, .col = 1 }
     };
 }
 
-static inline bool is_eof(const struct lexer* lexer) {
-    return lexer->bytes_left == 0;
-}
-
 static inline char next_char(const struct lexer* lexer, size_t i) {
-    assert(i < lexer->bytes_left);
-    return lexer->file_data[lexer->source_pos.bytes + i];
+    return lexer->file_data.data[lexer->pos.bytes_read + i];
 }
 
 static inline char cur_char(const struct lexer* lexer) {
     return next_char(lexer, 0);
 }
 
+static inline bool is_eof(const struct lexer* lexer) {
+    return lexer->pos.bytes_read >= lexer->file_data.length;
+}
+
 static inline void eat_char(struct lexer* lexer) {
     assert(!is_eof(lexer));
     if (cur_char(lexer) == '\n') {
-        lexer->source_pos.row++;
-        lexer->source_pos.col = 1;
+        lexer->pos.source_pos.row++;
+        lexer->pos.source_pos.col = 1;
     } else {
-        lexer->source_pos.col++;
+        lexer->pos.source_pos.col++;
     }
-    lexer->source_pos.bytes++;
-    lexer->bytes_left--;
+    lexer->pos.bytes_read++;
 }
 
 static inline bool accept_char(struct lexer* lexer, char c) {
@@ -53,22 +51,34 @@ static inline void eat_spaces(struct lexer* lexer) {
 
 static inline struct token make_token(
     struct lexer* lexer,
-    const struct source_pos* begin_pos,
+    const struct lexer_pos* begin_pos,
     enum token_tag tag)
 {
+    struct file_loc loc = {
+        .file_name = lexer->file_name,
+        .begin     = begin_pos->source_pos,
+        .end       = lexer->pos.source_pos
+    };
+
+    struct str_view contents = str_view_substr(
+        lexer->file_data,
+        begin_pos->bytes_read,
+        lexer->pos.bytes_read - begin_pos->bytes_read);
+
+    bool on_new_line = lexer->on_new_line;
+    lexer->on_new_line = tag == TOKEN_NL;
+
     return (struct token) {
-        .tag = tag,
-        .loc = {
-            .file_name = lexer->file_name,
-            .begin = *begin_pos,
-            .end = lexer->source_pos
-        }
+        .tag         = tag,
+        .loc         = loc,
+        .on_new_line = on_new_line,
+        .contents    = contents
     };
 }
 
 static inline struct token make_error_token(
     struct lexer* lexer,
-    const struct source_pos* begin_pos,
+    const struct lexer_pos* begin_pos,
     enum token_error error)
 {
     struct token token = make_token(lexer, begin_pos, TOKEN_ERROR);
@@ -97,7 +107,7 @@ static inline bool accept_exp(struct lexer* lexer, int base) {
 }
 
 static inline struct token parse_literal(struct lexer* lexer) {
-    struct source_pos begin_pos = lexer->source_pos;
+    struct lexer_pos begin_pos = lexer->pos;
 
     int base = 10;
     size_t prefix_len = 0;
@@ -124,9 +134,9 @@ static inline struct token parse_literal(struct lexer* lexer) {
     bool is_float = has_exp || has_dot;
     struct token token = make_token(lexer, &begin_pos, is_float ? TOKEN_FLOAT_LITERAL : TOKEN_INT_LITERAL);
     if (is_float)
-        token.float_literal = strtod(token_view(&token, lexer->file_data).data, NULL);
+        token.float_literal = strtod(token.contents.data, NULL);
     else
-        token.int_literal = strtoumax(token_view(&token, lexer->file_data).data + prefix_len, NULL, base);
+        token.int_literal = strtoumax(token.contents.data + prefix_len, NULL, base);
     return token;
 }
 
@@ -144,7 +154,7 @@ struct token lexer_advance(struct lexer* lexer) {
     while (true) {
         eat_spaces(lexer);
 
-        struct source_pos begin_pos = lexer->source_pos;
+        struct lexer_pos begin_pos = lexer->pos;
         if (is_eof(lexer))
             return make_token(lexer, &begin_pos, TOKEN_EOF);
 
@@ -174,7 +184,7 @@ struct token lexer_advance(struct lexer* lexer) {
         if (accept_char(lexer, '.')) {
             if (isdigit(cur_char(lexer)))
                 return parse_literal(lexer);
-            if (lexer->bytes_left >= 2 && cur_char(lexer) == '.' && next_char(lexer, 1) == '.') {
+            if (cur_char(lexer) == '.' && next_char(lexer, 1) == '.') {
                 eat_char(lexer);
                 eat_char(lexer);
                 return make_token(lexer, &begin_pos, TOKEN_ELLIPSIS);
@@ -307,8 +317,11 @@ struct token lexer_advance(struct lexer* lexer) {
 
         if (accept_char(lexer, '"')) {
             while (!is_eof(lexer) && cur_char(lexer) != '\n') {
-                if (accept_char(lexer, '"'))
-                    return make_token(lexer, &begin_pos, TOKEN_STRING_LITERAL);
+                if (accept_char(lexer, '"')) {
+                    struct token token = make_token(lexer, &begin_pos, TOKEN_STRING_LITERAL);
+                    token.string_literal = str_view_shrink(token.contents, 1, 1);
+                    return token;
+                }
                 eat_char(lexer);
             }
             return make_error_token(lexer, &begin_pos, TOKEN_ERROR_UNTERMINATED_STRING);
@@ -318,7 +331,7 @@ struct token lexer_advance(struct lexer* lexer) {
             while (!is_eof(lexer) && (isalnum(cur_char(lexer)) || cur_char(lexer) == '_'))
                 eat_char(lexer);
             struct token token = make_token(lexer, &begin_pos, TOKEN_IDENT);
-            enum token_tag keyword_tag = find_keyword(token_view(&token, lexer->file_data));
+            enum token_tag keyword_tag = find_keyword(token.contents);
             if (keyword_tag != TOKEN_ERROR)
                 token.tag = keyword_tag;
             return token;
