@@ -304,13 +304,13 @@ static const struct type* check_var(
     const struct type* type,
     bool is_global)
 {
-    insert_symbol(type_checker, ast->var.name, ast, false);
     type = check_array_dim(type_checker, ast->var.dim, type, false);
     if (ast->var.init) {
         if (is_global)
             log_error(type_checker->log, &ast->var.init->loc, "built-in global variables cannot be initialized");
         check_expr(type_checker, ast->var.init, type);
     }
+    insert_symbol(type_checker, ast->var.name, ast, false);
     return ast->type = type;
 }
 
