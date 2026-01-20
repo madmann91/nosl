@@ -154,11 +154,11 @@ int main(int argc, char** argv) {
     builtins_destroy(builtins);
     type_table_destroy(type_table);
     mem_pool_destroy(&mem_pool);
+    options_destroy(&options);
 
     if (file_count == 0) {
         fprintf(stderr, "no input files\n");
         return 1;
     }
-    options_destroy(&options);
     return status ? 0 : 1;
 }
