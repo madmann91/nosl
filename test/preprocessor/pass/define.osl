@@ -2,12 +2,16 @@
 #define A B
 #define B A
 #define C A
+// Expands to __attribute__((always_inline)) int foo(int x, int y) { int A = 1; return A; }
 FUNC_DECL(always_inline, (int x, int y)) { int A = 1; return C; }
 
 int VAR_DECL(int i) { return i; }
 #define VAR_DECL(x) int y = x
 
+#define ID(x) x
+
 shader test() {
     foo(1, 2);
-    VAR_DECL(VAR_DECL) (2);
+    VAR_DECL(VAR_DECL) (2); // Expands to int y = VAR_DECL(2);
+    int i = ID(ID(1));      // Expands to int i = 1;
 }

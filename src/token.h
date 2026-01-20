@@ -105,6 +105,7 @@
     x(FLOAT_LITERAL, "<floating-point literal>",) \
     x(STRING_LITERAL, "<string literal>",) \
     x(MACRO_PARAM, "<macro parameter>",) \
+    x(STOP_EXPAND, "<expansion sentinel>",) \
     SYMBOL_LIST(x) \
     KEYWORD_LIST(x)
 

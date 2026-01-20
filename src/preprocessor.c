@@ -59,6 +59,7 @@ struct macro {
     const char* name;
     struct token_vec tokens;
     struct file_loc loc;
+    bool is_disabled;
 };
 
 enum directive {
@@ -70,7 +71,7 @@ enum directive {
 
 enum context_tag {
     CONTEXT_SOURCE_FILE,
-    CONTEXT_EXPANDED_MACRO
+    CONTEXT_TOKEN_BUFFER
 };
 
 struct source_file {
@@ -80,24 +81,31 @@ struct source_file {
     struct cond_stack cond_stack;
 };
 
-struct expanded_macro {
-    const struct macro* macro;
+struct token_buffer {
     size_t token_index;
     struct token_vec tokens;
-    bool is_macro_arg;
 };
 
 struct context {
     enum context_tag tag;
+    bool is_finalized;
     bool is_active;
     struct token ahead[TOKENS_AHEAD];
+    struct macro* macro;
     struct context* prev;
-    struct context* parent;
     union {
-        struct source_file source_file;
-        struct expanded_macro expanded_macro;
+        struct source_file  source_file;
+        struct token_buffer token_buffer;
     };
 };
+
+struct macro_arg {
+    struct token_vec unexpanded_tokens;
+    struct token_vec expanded_tokens;
+    bool is_expanded;
+};
+
+VEC_DEFINE(macro_arg_vec, struct macro_arg, PRIVATE)
 
 static inline uint32_t hash_macro_name(uint32_t h, struct macro* const* macro) {
     return hash_uint64(h, (uint64_t)(*macro)->name);
@@ -165,12 +173,13 @@ static inline struct context* alloc_context(struct context* prev, enum context_t
 }
 
 static inline void advance_context(struct context* context) {
+    assert(context->is_finalized);
     struct token token = { .tag = TOKEN_EOF };
     if (context->tag == CONTEXT_SOURCE_FILE) {
         token = lexer_advance(&context->source_file.lexer);
-    } else if (context->tag == CONTEXT_EXPANDED_MACRO) {
-        if (context->expanded_macro.token_index < context->expanded_macro.tokens.elem_count)
-            token = context->expanded_macro.tokens.elems[context->expanded_macro.token_index++];
+    } else if (context->tag == CONTEXT_TOKEN_BUFFER) {
+        if (context->token_buffer.token_index < context->token_buffer.tokens.elem_count)
+            token = context->token_buffer.tokens.elems[context->token_buffer.token_index++];
     } else {
         assert(false && "invalid context");
     }
@@ -180,6 +189,7 @@ static inline void advance_context(struct context* context) {
 }
 
 static inline void finalize_context(struct context* context) {
+    context->is_finalized = true;
     for (int i = 0; i < TOKENS_AHEAD; ++i)
         advance_context(context);
 }
@@ -201,11 +211,16 @@ static inline struct context* open_source_file_context(struct context* prev, con
     return context;
 }
 
-static inline struct context* alloc_expanded_macro_context(struct context* prev, const struct macro* macro) {
-    struct context* context = alloc_context(prev, CONTEXT_EXPANDED_MACRO);
-    context->tag = CONTEXT_EXPANDED_MACRO;
-    context->expanded_macro.macro = macro;
-    context->expanded_macro.tokens = token_vec_create();
+static inline struct context* alloc_token_buffer_context(struct context* prev) {
+    struct context* context = alloc_context(prev, CONTEXT_TOKEN_BUFFER);
+    context->tag = CONTEXT_TOKEN_BUFFER;
+    context->token_buffer.tokens = token_vec_create();
+    return context;
+}
+
+static inline struct context* alloc_expanded_macro_context(struct context* prev, struct macro* macro) {
+    struct context* context = alloc_token_buffer_context(prev);
+    context->macro = macro;
     return context;
 }
 
@@ -213,8 +228,8 @@ static inline void free_context(struct context* context) {
     if (context->tag == CONTEXT_SOURCE_FILE) {
         free(context->source_file.file_data);
         cond_vec_destroy(&context->source_file.cond_stack.conds);
-    } else if (context->tag == CONTEXT_EXPANDED_MACRO) {
-        token_vec_destroy(&context->expanded_macro.tokens);
+    } else if (context->tag == CONTEXT_TOKEN_BUFFER) {
+        token_vec_destroy(&context->token_buffer.tokens);
     } else {
         assert(false && "invalid context");
     }
@@ -222,6 +237,8 @@ static inline void free_context(struct context* context) {
 }
 
 static inline void push_context(struct preprocessor* preprocessor, struct context* context) {
+    if (context->macro)
+        context->macro->is_disabled = true;
     context->prev = preprocessor->context;
     preprocessor->context = context;
 }
@@ -242,21 +259,27 @@ static inline struct context* pop_context(struct preprocessor* preprocessor) {
     if (last_cond)
         log_error(preprocessor->log, &last_cond->loc, "unterminated '#if'");
 
+    if (preprocessor->context->macro)
+        preprocessor->context->macro->is_disabled = false;
+
     struct context* prev_context = preprocessor->context->prev;
     free_context(preprocessor->context);
     return preprocessor->context = prev_context;
 }
 
-static inline struct token read_or_peek_token(struct preprocessor* preprocessor, bool update_context) {
+static inline struct context* update_or_peek_context(struct preprocessor* preprocessor, bool update_context) {
     struct context* context = preprocessor->context;
     assert(context);
-
     while (context->ahead->tag == TOKEN_EOF) {
         if (!context->prev)
             break;
         context = update_context ? pop_context(preprocessor) : context->prev;
     }
+    return context;
+}
 
+static inline struct token read_or_peek_token(struct preprocessor* preprocessor, bool update_context) {
+    struct context* context = update_or_peek_context(preprocessor, update_context);
     struct token token = context->ahead[0];
     if (update_context && token.tag != TOKEN_EOF)
         advance_context(context);
@@ -296,104 +319,138 @@ static inline bool expect_token(struct preprocessor* preprocessor, enum token_ta
     return true;
 }
 
-static inline struct context* expand_macro(
+static inline struct macro_arg macro_arg_create(void) {
+    return (struct macro_arg) {
+        .expanded_tokens = token_vec_create(),
+        .unexpanded_tokens = token_vec_create()
+    };
+}
+
+static inline void macro_arg_destroy(struct macro_arg* macro_arg) {
+    token_vec_destroy(&macro_arg->expanded_tokens);
+    token_vec_destroy(&macro_arg->unexpanded_tokens);
+    memset(macro_arg, 0, sizeof(struct macro_arg));
+}
+
+static inline struct token expand_token(struct preprocessor*);
+
+static const struct token_vec* expand_macro_arg(struct preprocessor* preprocessor, struct macro_arg* macro_arg) {
+    if (macro_arg->is_expanded)
+        return &macro_arg->expanded_tokens;
+
+    // Push a context with all the tokens of the macro argument on it, and then expand every token
+    // from that context, to get the fully expanded tokens of the macro argument.
+    struct context* context = alloc_token_buffer_context(preprocessor->context);
+    VEC_FOREACH(struct token, token, macro_arg->unexpanded_tokens)
+        token_vec_push(&context->token_buffer.tokens, token);
+    token_vec_push(&context->token_buffer.tokens, &(struct token) { .tag = TOKEN_STOP_EXPAND });
+    finalize_context(context);
+    push_context(preprocessor, context);
+
+    while (true) {
+        struct token token = expand_token(preprocessor);
+        if (token.tag == TOKEN_STOP_EXPAND)
+            break;
+        token_vec_push(&macro_arg->expanded_tokens, &token);
+    }
+
+    macro_arg->is_expanded = true;
+    return &macro_arg->expanded_tokens;
+}
+
+static inline bool parse_macro_args(
     struct preprocessor* preprocessor,
     const struct macro* macro,
+    struct macro_arg_vec* macro_args,
     const struct file_loc* loc)
 {
-    struct context* context = alloc_expanded_macro_context(preprocessor->context, macro);
+    if (!macro->has_params)
+        return true;
 
-    // The i-th argument occupies the argument range `args[arg_indices[i]..arg_indices[i+1]]`.
-    struct small_token_vec args;
-    struct small_index_vec arg_indices;
-    small_token_vec_init(&args);
-    small_index_vec_init(&arg_indices);
+    eat_token(preprocessor, TOKEN_LPAREN);
+    struct macro_arg* last_arg = NULL;
+    size_t paren_depth = 0;
 
-    if (macro->has_params) {
-        eat_token(preprocessor, TOKEN_LPAREN);
-        size_t paren_depth = 0;
-
-        small_index_vec_push(&arg_indices, &args.elem_count);
-        while (true) {
-            struct token token = read_token(preprocessor);
-            if (token.tag == TOKEN_EOF) {
-                log_error(preprocessor->log, &token.loc, "unterminated argument list for macro '%s'", macro->name);
+    while (true) {
+        struct token token = read_token(preprocessor);
+        if (token.tag == TOKEN_EOF) {
+            log_error(preprocessor->log, &token.loc, "unterminated argument list for macro '%s'", macro->name);
+            return false;
+        } else if (token.tag == TOKEN_RPAREN) {
+            if (paren_depth == 0)
                 break;
-            } else if (token.tag == TOKEN_RPAREN) {
-                if (paren_depth == 0)
-                    break;
-                paren_depth--;
-            } else if (token.tag == TOKEN_LPAREN) {
-                paren_depth++;
-            } else if (token.tag == TOKEN_COMMA && paren_depth == 0 && arg_indices.elem_count <= macro->param_count) {
-                // Everything after the regular macro arguments belongs to __VA_ARG__, including commas.
-                small_index_vec_push(&arg_indices, &args.elem_count);
-                continue;
-            }
-
-            small_token_vec_push(&args, &token);
+            paren_depth--;
+        } else if (token.tag == TOKEN_LPAREN) {
+            paren_depth++;
+        } else if (token.tag == TOKEN_COMMA && paren_depth == 0 && macro_args->elem_count <= macro->param_count) {
+            // Everything after the regular macro arguments belongs to __VA_ARG__, including commas.
+            last_arg = NULL;
+            continue;
         }
+
+        if (!last_arg) {
+            struct macro_arg macro_arg = macro_arg_create();
+            macro_arg_vec_push(macro_args, &macro_arg);
+            last_arg = macro_arg_vec_last(macro_args);
+        }
+
+        token_vec_push(&last_arg->unexpanded_tokens, &token);
     }
 
-    // Place sentinel to simplify the code below.
-    const size_t arg_count = arg_indices.elem_count;
-    small_index_vec_push(&arg_indices, &args.elem_count);
-
-    if (macro->param_count > arg_count || (!macro->is_variadic && macro->param_count != arg_count)) {
+    if (macro->param_count > macro_args->elem_count || (!macro->is_variadic && macro->param_count != macro_args->elem_count)) {
         log_error(preprocessor->log, loc, "expected %zu argument(s) to macro '%s', but got %zu",
-            macro->param_count, macro->name, arg_count);
+            macro->param_count, macro->name, macro_args->elem_count);
+        return false;
     }
+    return true;
+}
 
+static inline struct context* expand_macro_with_args(
+    struct preprocessor* preprocessor,
+    struct macro* macro,
+    struct macro_arg* args,
+    size_t arg_count,
+    [[maybe_unused]] const struct file_loc* loc)
+{
+    assert(macro->param_count == arg_count || (arg_count >= macro->param_count && macro->is_variadic));
+    struct context* context = alloc_expanded_macro_context(preprocessor->context, macro);
     for (size_t i = 0; i < macro->tokens.elem_count; ++i) {
         struct token token = macro->tokens.elems[i];
         if (token.tag == TOKEN_MACRO_PARAM) {
-            // May happen if the error above triggered, or in the absence of an argument for
-            // '__VA_ARGS__', in which case we just skip this parameter.
+            // May happen if there is no argument for '__VA_ARGS__', in which case we just skip this parameter.
             if (token.macro_param_index >= arg_count)
                 continue;
 
-            const size_t begin = arg_indices.elems[token.macro_param_index];
-            const size_t end   = arg_indices.elems[token.macro_param_index + 1];
-            for (size_t j = begin; j < end; ++j)
-                token_vec_push(&context->expanded_macro.tokens, &args.elems[j]);
+            const struct token_vec* expanded_tokens = expand_macro_arg(preprocessor, &args[token.macro_param_index]);
+            VEC_FOREACH(struct token, token, *expanded_tokens)
+                token_vec_push(&context->token_buffer.tokens, token);
         } else if (token.tag == TOKEN_CONCAT) {
             // TODO!
         } else if (token.tag == TOKEN_HASH) {
-            /*assert(i + 1 < macro->tokens.elem_count);
-            assert(macro->tokens.elems[i + 1].tag == TOKEN_MACRO_PARAM);
-            size_t macro_param_index = macro->tokens.elems[++i].macro_param_index;
-            const size_t begin = arg_indices.elems[macro_param_index];
-            const size_t end   = arg_indices.elems[macro_param_index + 1];
-            struct file_loc loc = {
-                .file_name = args.elems[begin].loc.file_name,
-                .begin = args.elems[begin].loc.begin,
-                .end   = args.elems[end].loc.end,
-            };
-            struct token token = {
-                .contents =
-                .loc = loc
-            };
-            token_vec_push(&context->macro_context.tokens, &token);*/
+            // TODO!
         } else {
-            token_vec_push(&context->expanded_macro.tokens, &macro->tokens.elems[i]);
+            token_vec_push(&context->token_buffer.tokens, &macro->tokens.elems[i]);
         }
     }
 
-    small_token_vec_destroy(&args);
-    small_index_vec_destroy(&arg_indices);
     finalize_context(context);
     return context;
 }
 
-static inline bool can_expand_macro(struct preprocessor* preprocessor, const struct macro* macro) {
-    // Make sure we do not allow recursive macro expansion
-    struct context* context = preprocessor->context;
-    while (context && context->tag == CONTEXT_EXPANDED_MACRO) {
-        if (context->expanded_macro.macro == macro && !context->expanded_macro.is_macro_arg)
-            return false;
-        context = context->prev;
-    }
-    return true;
+static inline struct context* expand_macro(
+    struct preprocessor* preprocessor,
+    struct macro* macro,
+    const struct file_loc* loc)
+{
+    struct context* context = NULL;
+    struct macro_arg_vec macro_args = macro_arg_vec_create();
+    if (parse_macro_args(preprocessor, macro, &macro_args, loc))
+        context = expand_macro_with_args(preprocessor, macro, macro_args.elems, macro_args.elem_count, loc);
+
+    VEC_FOREACH(struct macro_arg, macro_arg, macro_args)
+        macro_arg_destroy(macro_arg);
+    macro_arg_vec_destroy(&macro_args);
+    return context;
 }
 
 static inline struct token expand_token(struct preprocessor* preprocessor) {
@@ -406,15 +463,17 @@ static inline struct token expand_token(struct preprocessor* preprocessor) {
         if (!ident)
             return token;
 
-        const struct macro* macro = find_macro(preprocessor, ident);
-        if (!macro || !can_expand_macro(preprocessor, macro))
+        struct macro* macro = find_macro(preprocessor, ident);
+        if (!macro || macro->is_disabled)
             return token;
 
         const bool has_args = peek_token(preprocessor).tag == TOKEN_LPAREN;
         if (macro->has_params && !has_args)
             return token;
 
-        push_context(preprocessor, expand_macro(preprocessor, macro, &token.loc));
+        struct context* context = expand_macro(preprocessor, macro, &token.loc);
+        if (context)
+            push_context(preprocessor, context);
     }
 }
 
