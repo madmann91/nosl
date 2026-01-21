@@ -898,7 +898,7 @@ static struct str_view parse_include_file_name(struct preprocessor* preprocessor
     }
 }
 
-bool find_include_file_in_path(
+bool does_file_exist_in_path(
     struct str_view include_path,
     struct str_view include_file_name,
     struct str* full_path)
@@ -923,19 +923,19 @@ static bool find_include_file_name(
                 continue;
 
             struct str_view include_path = split_path(STR_VIEW(context->source_file.file_name)).dir_name;
-            if (find_include_file_in_path(include_path, include_file_name, full_path))
+            if (does_file_exist_in_path(include_path, include_file_name, full_path))
                 return true;
         }
     }
     for (size_t i = 0; preprocessor->include_paths[i]; ++i) {
         struct str_view include_path = STR_VIEW(preprocessor->include_paths[i]);
-        if (find_include_file_in_path(include_path, include_file_name, full_path))
+        if (does_file_exist_in_path(include_path, include_file_name, full_path))
             return true;
     }
     return false;
 }
 
-static struct context* find_include_file(
+static struct context* open_include_file_context(
     struct preprocessor* preprocessor,
     struct str_view include_file_name,
     bool is_relative_include)
@@ -967,7 +967,7 @@ static void parse_include(struct preprocessor* preprocessor, struct file_loc* lo
     struct context* context = NULL;
     if (include_file_name.length > 0) {
         bool is_relative_include = skip_include_file_delimiters(&include_file_name);
-        context = find_include_file(preprocessor, include_file_name, is_relative_include);
+        context = open_include_file_context(preprocessor, include_file_name, is_relative_include);
         if (!context) {
             log_error(preprocessor->log, loc, "cannot find include file '%.*s'",
                 (int)include_file_name.length, include_file_name.data);
