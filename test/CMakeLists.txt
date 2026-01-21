@@ -17,6 +17,7 @@ function (add_nosl_test)
     if (NOT ${add_nosl_test_arg_REGEX} STREQUAL "")
         set_tests_properties(${add_nosl_test_arg_FILE} PROPERTIES PASS_REGULAR_EXPRESSION "${add_nosl_test_arg_REGEX}")
     endif()
+    set_tests_properties(${add_nosl_test_arg_FILE} PROPERTIES FAIL_REGULAR_EXPRESSION "LeakSanitizer|AddressSanitizer")
     set_tests_properties(${add_nosl_test_arg_FILE} PROPERTIES LABELS ${add_nosl_test_arg_LABELS})
 endfunction()
 
@@ -27,6 +28,7 @@ set_tests_properties(no_input_file PROPERTIES PASS_REGULAR_EXPRESSION "no input 
 
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/double_else.osl"          REGEX "'#else' after '#else'")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/undef.osl"                REGEX "unknown macro")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/missing_include.osl"      REGEX "cannot find include file")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_if_0.osl"    REGEX "unterminated '#if'")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_if_1.osl"    REGEX "unterminated '#if'")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_if_if_0.osl" REGEX "unterminated '#if'")

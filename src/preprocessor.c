@@ -243,12 +243,8 @@ static inline void push_context(struct preprocessor* preprocessor, struct contex
     preprocessor->context = context;
 }
 
-static inline bool is_cond_stack_empty(const struct cond_stack* cond_stack) {
-    return cond_vec_is_empty(&cond_stack->conds) && cond_stack->inactive_cond_depth == 0;
-}
-
 static inline struct cond* find_last_cond(const struct context* context) {
-    if (context->tag != CONTEXT_SOURCE_FILE || is_cond_stack_empty(&context->source_file.cond_stack))
+    if (context->tag != CONTEXT_SOURCE_FILE || cond_vec_is_empty(&context->source_file.cond_stack.conds))
         return NULL;
     return cond_vec_last((struct cond_vec*)&context->source_file.cond_stack.conds);
 }
@@ -686,7 +682,7 @@ static void parse_ifndef(struct preprocessor* preprocessor, struct file_loc* loc
 
 static void parse_elifdef_or_elifndef(struct preprocessor* preprocessor, bool is_elifndef, struct file_loc* loc) {
     const char* directive_name = is_elifndef ? "elifndef" : "elifdef";
-    if (!error_on_empty_cond_stack(preprocessor, "elif", loc))
+    if (!error_on_empty_cond_stack(preprocessor, directive_name, loc))
         enter_elif(preprocessor, directive_name, is_elifndef ? COND_IS_NOT_DEFINED : COND_IS_DEFINED, loc);
 }
 
@@ -884,12 +880,12 @@ bool find_include_file_in_path(
     return file_exists(full_path->data);
 }
 
-static struct context* find_include_file(
+static bool find_include_file_name(
     struct preprocessor* preprocessor,
     struct str_view include_file_name,
-    bool is_relative_include)
+    bool is_relative_include,
+    struct str* full_path)
 {
-    struct str full_path = str_create();
     if (is_relative_include) {
         for (struct context* context = preprocessor->context; context; context = context->prev) {
             // Walk up the chain of included files, lookup files in the same directory
@@ -897,21 +893,31 @@ static struct context* find_include_file(
                 continue;
 
             struct str_view include_path = split_path(STR_VIEW(context->source_file.file_name)).dir_name;
-            if (find_include_file_in_path(include_path, include_file_name, &full_path))
-                goto found;
+            if (find_include_file_in_path(include_path, include_file_name, full_path))
+                return true;
         }
     }
     for (size_t i = 0; preprocessor->include_paths[i]; ++i) {
         struct str_view include_path = STR_VIEW(preprocessor->include_paths[i]);
-        if (find_include_file_in_path(include_path, include_file_name, &full_path))
-            goto found;
+        if (find_include_file_in_path(include_path, include_file_name, full_path))
+            return true;
     }
-    return NULL;
+    return false;
+}
 
-found:
-    const char* file_name = str_pool_insert(preprocessor->str_pool, full_path.data);
+static struct context* find_include_file(
+    struct preprocessor* preprocessor,
+    struct str_view include_file_name,
+    bool is_relative_include)
+{
+    struct str full_path = str_create();
+    struct context* context = NULL;
+    if (find_include_file_name(preprocessor, include_file_name, is_relative_include, &full_path)) {
+        context = open_source_file_context(
+            preprocessor->context, str_pool_insert(preprocessor->str_pool, full_path.data));
+    }
     str_destroy(&full_path);
-    return open_source_file_context(preprocessor->context, file_name);
+    return context;
 }
 
 static bool skip_include_file_delimiters(struct str_view* include_file_name) {
@@ -970,7 +976,7 @@ static void parse_directive(struct preprocessor* preprocessor) {
     }
 
     if (directive == DIRECTIVE_NONE) {
-        log_error(preprocessor->log, &token.loc, "invalid preprocessor directive '%*.s'",
+        log_error(preprocessor->log, &token.loc, "invalid preprocessor directive '%.*s'",
             (int)token.contents.length, token.contents.data);
         return;
     }
