@@ -1,0 +1,5 @@
+shader foo() {
+    string quotes   = "\"";
+    string new_line = "\n";
+    string tab      = "\t";
+}

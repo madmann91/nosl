@@ -46,11 +46,3 @@ struct token token_concat(const struct token* left, const struct token* right) {
         }
     }
 }
-
-struct token token_stringify(const struct token* token) {
-    return (struct token) {
-        .tag = TOKEN_STRING_LITERAL,
-        .loc = token->loc,
-        .string_literal = token->contents
-    };
-}

@@ -1,5 +1,9 @@
 #define STR(x) #x
+#define STR_MANY(...) #__VA_ARGS__
 
 shader foo() {
-    string s = STR(1);
+    string s1 = STR(1);
+    string s2 = STR(( 1, 2 ));
+    string s3 = STR("A" 1);
+    string s4 = STR_MANY(A, "B" C);
 }

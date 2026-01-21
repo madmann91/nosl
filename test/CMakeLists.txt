@@ -38,11 +38,7 @@ add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/warning.osl"          
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/bad_macro_ellipsis.osl"   REGEX "expected '\\)', but got ','")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/bad_va_args.osl"          REGEX "'__VA_ARGS__' is only allowed inside variadic macros" ARGS --warns-as-errors)
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/too_many_args.osl"        REGEX "expected 1 argument\\(s\\) to macro 'TEST', but got 2")
-
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/invalid_stringify.osl"
-    REGEX "\
-stringification operator '#' must be followed by a macro parameter.*\
-stringification operator '#' must be followed by a macro parameter")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/invalid_stringify.osl"    REGEX "stringification operator '#' must be followed by a macro parameter")
 
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/if_elif_else.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/warning.osl")
@@ -54,10 +50,17 @@ add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/include.osl" ARGS -I $
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/define.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/variadic_macros.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/ignore_va_args.osl")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/stringify.osl")
+
+add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/stringify.osl" ARGS --print-ast REGEX
+    REGEX ".*\
+string s1 = \"1\";.*\
+string s2 = \"( 1, 2 )\";.*\
+string s3 = \"\\\"A\\\" 1\";.*\
+string s4 = \"A, \\\"B\\\" C\";")
 
 # Frontend Tests ----------------------------------------------------------------------------------
 
+add_nosl_test(LABELS frontend FILE "frontend/pass/strings.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/functions.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/types.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/attributes.osl")

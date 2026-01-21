@@ -15,6 +15,7 @@ struct lexer {
     struct str_view file_data;
     struct lexer_pos pos;
     bool on_new_line;
+    bool has_space_before;
 };
 
 [[nodiscard]] struct lexer lexer_create(struct str_view file_name, struct str_view file_data);

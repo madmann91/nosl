@@ -100,6 +100,7 @@ struct context {
 };
 
 struct macro_arg {
+    struct file_loc loc;
     struct token_vec unexpanded_tokens;
     struct token_vec expanded_tokens;
     bool is_expanded;
@@ -354,6 +355,33 @@ static const struct token_vec* expand_macro_arg(struct preprocessor* preprocesso
     return &macro_arg->expanded_tokens;
 }
 
+static struct token stringify_macro_arg(struct preprocessor* preprocessor, struct macro_arg* macro_arg) {
+    struct str str = str_create();
+    str_push(&str, '\"');
+    for (size_t i = 0; i < macro_arg->unexpanded_tokens.elem_count; ++i) {
+        struct token token = macro_arg->unexpanded_tokens.elems[i];
+        if (token.has_space_before)
+            str_push(&str, ' ');
+        if (token.tag == TOKEN_STRING_LITERAL) {
+            str_append(&str, STR_VIEW("\\\""));
+            str_append(&str, str_view_shrink(token.contents, 1, 1));
+            str_append(&str, STR_VIEW("\\\""));
+        } else {
+            str_append(&str, token.contents);
+        }
+    }
+    str_push(&str, '\"');
+    const char* contents = str_pool_insert_view(preprocessor->str_pool, str_to_view(&str));
+    str_destroy(&str);
+
+    return (struct token) {
+        .tag = TOKEN_STRING_LITERAL,
+        .loc = macro_arg->loc,
+        .contents = STR_VIEW(contents),
+        .string_literal = str_view_shrink(STR_VIEW(contents), 1, 1)
+    };
+}
+
 static inline bool parse_macro_args(
     struct preprocessor* preprocessor,
     const struct macro* macro,
@@ -378,16 +406,19 @@ static inline bool parse_macro_args(
             paren_depth--;
         } else if (token.tag == TOKEN_LPAREN) {
             paren_depth++;
-        } else if (token.tag == TOKEN_COMMA && paren_depth == 0 && macro_args->elem_count <= macro->param_count) {
-            // Everything after the regular macro arguments belongs to __VA_ARG__, including commas.
-            last_arg = NULL;
-            continue;
         }
 
         if (!last_arg) {
             struct macro_arg macro_arg = macro_arg_create();
             macro_arg_vec_push(macro_args, &macro_arg);
             last_arg = macro_arg_vec_last(macro_args);
+            last_arg->loc = token.loc;
+        }
+
+        // Everything after the regular macro arguments belongs to __VA_ARG__, including commas.
+        if (token.tag == TOKEN_COMMA && paren_depth == 0 && macro_args->elem_count <= macro->param_count) {
+            last_arg = NULL;
+            continue;
         }
 
         token_vec_push(&last_arg->unexpanded_tokens, &token);
@@ -423,7 +454,10 @@ static inline struct context* expand_macro_with_args(
         } else if (token.tag == TOKEN_CONCAT) {
             // TODO!
         } else if (token.tag == TOKEN_HASH) {
-            // TODO!
+            assert(i + 1 < macro->tokens.elem_count);
+            assert(macro->tokens.elems[i + 1].tag == TOKEN_MACRO_PARAM);
+            struct token token = stringify_macro_arg(preprocessor, &args[macro->tokens.elems[++i].macro_param_index]);
+            token_vec_push(&context->token_buffer.tokens, &token);
         } else {
             token_vec_push(&context->token_buffer.tokens, &macro->tokens.elems[i]);
         }
@@ -715,14 +749,10 @@ static inline size_t find_macro_param_index(
     return SIZE_MAX;
 }
 
-static bool is_macro_param(const struct macro* macro, const struct token* token) {
-    return token->tag == TOKEN_MACRO_PARAM && token->macro_param_index < macro->param_count;
-}
-
 static bool verify_macro(struct preprocessor* preprocessor, const struct macro* macro) {
     for (size_t i = 0; i < macro->tokens.elem_count; ++i) {
         if (macro->tokens.elems[i].tag == TOKEN_HASH &&
-            (i + 1 == macro->tokens.elem_count || !is_macro_param(macro, &macro->tokens.elems[i + 1])))
+            (i + 1 == macro->tokens.elem_count || macro->tokens.elems[i + 1].tag != TOKEN_MACRO_PARAM))
         {
             log_error(preprocessor->log, &macro->loc, "stringification operator '#' must be followed by a macro parameter");
             return false;

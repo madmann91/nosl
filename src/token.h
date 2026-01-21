@@ -127,6 +127,7 @@ enum token_error {
 struct token {
     enum token_tag tag;
     bool on_new_line;
+    bool has_space_before;
     struct file_loc loc;
     struct str_view contents;
     union {
@@ -146,4 +147,3 @@ SMALL_VEC_DECL(small_token_vec, struct token, PUBLIC)
 [[nodiscard]] bool token_tag_is_keyword(enum token_tag);
 
 [[nodiscard]] struct token token_concat(const struct token*, const struct token*);
-[[nodiscard]] struct token token_stringify(const struct token*);

@@ -9,6 +9,7 @@ struct lexer lexer_create(struct str_view file_name, struct str_view file_data) 
         .file_name = file_name,
         .file_data = file_data,
         .on_new_line = true,
+        .has_space_before = false,
         .pos.source_pos = { .row = 1, .col = 1 }
     };
 }
@@ -45,8 +46,11 @@ static inline bool accept_char(struct lexer* lexer, char c) {
 }
 
 static inline void eat_spaces(struct lexer* lexer) {
-    while (!is_eof(lexer) && isspace(cur_char(lexer)) && cur_char(lexer) != '\n')
+    lexer->has_space_before = false;
+    while (!is_eof(lexer) && isspace(cur_char(lexer)) && cur_char(lexer) != '\n') {
+        lexer->has_space_before = true;
         eat_char(lexer);
+    }
 }
 
 static inline struct token make_token(
@@ -69,10 +73,11 @@ static inline struct token make_token(
     lexer->on_new_line = tag == TOKEN_NL;
 
     return (struct token) {
-        .tag         = tag,
-        .loc         = loc,
-        .on_new_line = on_new_line,
-        .contents    = contents
+        .tag              = tag,
+        .loc              = loc,
+        .on_new_line      = on_new_line,
+        .has_space_before = lexer->has_space_before,
+        .contents         = contents
     };
 }
 
@@ -316,12 +321,14 @@ struct token lexer_advance(struct lexer* lexer) {
             return parse_literal(lexer);
 
         if (accept_char(lexer, '"')) {
+            bool escape_active = false;
             while (!is_eof(lexer) && cur_char(lexer) != '\n') {
-                if (accept_char(lexer, '"')) {
+                if (!escape_active && accept_char(lexer, '"')) {
                     struct token token = make_token(lexer, &begin_pos, TOKEN_STRING_LITERAL);
                     token.string_literal = str_view_shrink(token.contents, 1, 1);
                     return token;
                 }
+                escape_active = cur_char(lexer) == '\\';
                 eat_char(lexer);
             }
             return make_error_token(lexer, &begin_pos, TOKEN_ERROR_UNTERMINATED_STRING);
