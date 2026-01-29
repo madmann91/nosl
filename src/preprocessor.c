@@ -898,7 +898,7 @@ static struct str_view parse_include_file_name(struct preprocessor* preprocessor
     }
 }
 
-bool does_file_exist_in_path(
+static inline bool does_file_exist_in_path(
     struct str_view include_path,
     struct str_view include_file_name,
     struct str* full_path)
