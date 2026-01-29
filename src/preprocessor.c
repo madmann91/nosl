@@ -360,7 +360,7 @@ static struct token stringify_macro_arg(struct preprocessor* preprocessor, struc
     str_push(&str, '\"');
     for (size_t i = 0; i < macro_arg->unexpanded_tokens.elem_count; ++i) {
         struct token token = macro_arg->unexpanded_tokens.elems[i];
-        if (token.has_space_before)
+        if (token.has_space_before && i > 0)
             str_push(&str, ' ');
         if (token.tag == TOKEN_STRING_LITERAL) {
             str_append(&str, STR_VIEW("\\\""));

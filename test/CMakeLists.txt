@@ -56,7 +56,8 @@ add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/stringify.osl" ARGS --
 string s1 = \"1\";.*\
 string s2 = \"( 1, 2 )\";.*\
 string s3 = \"\\\"A\\\" 1\";.*\
-string s4 = \"A, \\\"B\\\" C\";")
+string s4 = \"A, \\\"B\\\" C\";.*\
+string s5 = \"A B\";")
 
 # Frontend Tests ----------------------------------------------------------------------------------
 
