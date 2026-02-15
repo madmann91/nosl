@@ -382,6 +382,30 @@ static struct token stringify_macro_arg(struct preprocessor* preprocessor, struc
     };
 }
 
+static inline struct token concatenate_tokens(
+    struct preprocessor* preprocessor,
+    const struct token* left_token,
+    const struct token* right_token,
+    const struct file_loc* concat_loc)
+{
+    struct str concat_str = str_create();
+    str_append(&concat_str, left_token->contents);
+    str_append(&concat_str, right_token->contents);
+    const char* lexer_data = str_pool_insert_view(preprocessor->str_pool, str_to_view(&concat_str));
+    str_destroy(&concat_str);
+
+    struct lexer lexer = lexer_create(concat_loc->file_name, STR_VIEW(lexer_data));
+    struct token first_token = lexer_advance(&lexer);
+    struct token next_token = lexer_advance(&lexer);
+    if (first_token.tag == TOKEN_ERROR || next_token.tag != TOKEN_EOF) {
+        log_error(preprocessor->log, &left_token->loc, "cannot concatenate '%.*s' and '%.*s'",
+            (int)left_token ->contents.length, left_token ->contents.data,
+            (int)right_token->contents.length, right_token->contents.data);
+    }
+    first_token.loc = *concat_loc;
+    return first_token;
+}
+
 static inline bool parse_macro_args(
     struct preprocessor* preprocessor,
     const struct macro* macro,
@@ -397,6 +421,15 @@ static inline bool parse_macro_args(
 
     while (true) {
         struct token token = read_token(preprocessor);
+
+        // Allocate a macro argument, if there is not one already.
+        if (!last_arg) {
+            struct macro_arg macro_arg = macro_arg_create();
+            macro_arg_vec_push(macro_args, &macro_arg);
+            last_arg = macro_arg_vec_last(macro_args);
+            last_arg->loc = token.loc;
+        }
+
         if (token.tag == TOKEN_EOF) {
             log_error(preprocessor->log, &token.loc, "unterminated argument list for macro '%s'", macro->name);
             return false;
@@ -406,13 +439,6 @@ static inline bool parse_macro_args(
             paren_depth--;
         } else if (token.tag == TOKEN_LPAREN) {
             paren_depth++;
-        }
-
-        if (!last_arg) {
-            struct macro_arg macro_arg = macro_arg_create();
-            macro_arg_vec_push(macro_args, &macro_arg);
-            last_arg = macro_arg_vec_last(macro_args);
-            last_arg->loc = token.loc;
         }
 
         // Everything after the regular macro arguments belongs to __VA_ARG__, including commas.
@@ -440,27 +466,47 @@ static inline struct context* expand_macro_with_args(
     [[maybe_unused]] const struct file_loc* loc)
 {
     assert(macro->param_count == arg_count || (arg_count >= macro->param_count && macro->is_variadic));
+    bool should_concat = false;
+    struct file_loc concat_loc = {};
+
     struct context* context = alloc_expanded_macro_context(preprocessor->context, macro);
     for (size_t i = 0; i < macro->tokens.elem_count; ++i) {
-        struct token token = macro->tokens.elems[i];
-        if (token.tag == TOKEN_MACRO_PARAM) {
+        struct token macro_token = macro->tokens.elems[i];
+        const struct token* expanded_tokens = &macro_token;
+        size_t num_expanded_tokens = 1;
+
+        if (macro_token.tag == TOKEN_MACRO_PARAM) {
             // May happen if there is no argument for '__VA_ARGS__', in which case we just skip this parameter.
-            if (token.macro_param_index >= arg_count)
+            if (macro_token.macro_param_index >= arg_count)
                 continue;
 
-            const struct token_vec* expanded_tokens = expand_macro_arg(preprocessor, &args[token.macro_param_index]);
-            VEC_FOREACH(struct token, token, *expanded_tokens)
-                token_vec_push(&context->token_buffer.tokens, token);
-        } else if (token.tag == TOKEN_CONCAT) {
-            // TODO!
-        } else if (token.tag == TOKEN_HASH) {
+            const struct token_vec* expanded_arg_tokens = expand_macro_arg(preprocessor, &args[macro_token.macro_param_index]);
+            expanded_tokens = expanded_arg_tokens->elems;
+            num_expanded_tokens = expanded_arg_tokens->elem_count;
+        } else if (macro_token.tag == TOKEN_CONCAT) {
+            should_concat = true;
+            concat_loc = macro_token.loc;
+            continue;
+        } else if (macro_token.tag == TOKEN_HASH) {
             assert(i + 1 < macro->tokens.elem_count);
             assert(macro->tokens.elems[i + 1].tag == TOKEN_MACRO_PARAM);
-            struct token token = stringify_macro_arg(preprocessor, &args[macro->tokens.elems[++i].macro_param_index]);
-            token_vec_push(&context->token_buffer.tokens, &token);
-        } else {
-            token_vec_push(&context->token_buffer.tokens, &macro->tokens.elems[i]);
+            macro_token = stringify_macro_arg(preprocessor, &args[macro->tokens.elems[++i].macro_param_index]);
         }
+
+        if (should_concat) {
+            // There may not be a right-hand side or left-hand side to the concatenation operator,
+            // if argument expansion produced no token on either side.
+            if (num_expanded_tokens > 0 && !token_vec_is_empty(&context->token_buffer.tokens)) {
+                struct token* last_token = token_vec_last(&context->token_buffer.tokens);
+                *last_token = concatenate_tokens(preprocessor, last_token, &expanded_tokens[0], &concat_loc);
+                expanded_tokens++;
+                num_expanded_tokens--;
+            }
+            should_concat = false;
+        }
+
+        for (size_t i = 0; i < num_expanded_tokens; ++i)
+            token_vec_push(&context->token_buffer.tokens, &expanded_tokens[i]);
     }
 
     finalize_context(context);
@@ -486,7 +532,7 @@ static inline struct context* expand_macro(
 static inline struct token expand_token(struct preprocessor* preprocessor) {
     while (true) {
         struct token token = read_token(preprocessor);
-        if (token.tag != TOKEN_IDENT)
+        if (token.tag != TOKEN_IDENT || !preprocessor->context->is_active)
             return token;
 
         const char* ident = str_pool_find_view(preprocessor->str_pool, token.contents);
@@ -751,11 +797,21 @@ static inline size_t find_macro_param_index(
 
 static bool verify_macro(struct preprocessor* preprocessor, const struct macro* macro) {
     for (size_t i = 0; i < macro->tokens.elem_count; ++i) {
-        if (macro->tokens.elems[i].tag == TOKEN_HASH &&
-            (i + 1 == macro->tokens.elem_count || macro->tokens.elems[i + 1].tag != TOKEN_MACRO_PARAM))
-        {
-            log_error(preprocessor->log, &macro->loc, "stringification operator '#' must be followed by a macro parameter");
-            return false;
+        switch (macro->tokens.elems[i].tag) {
+            case TOKEN_HASH:
+                if (i + 1 == macro->tokens.elem_count || macro->tokens.elems[i + 1].tag != TOKEN_MACRO_PARAM) {
+                    log_error(preprocessor->log, &macro->loc, "stringification operator '#' must be followed by a macro parameter");
+                    return false;
+                }
+                break;
+            case TOKEN_CONCAT:
+                if (i == 0 || i + 1 == macro->tokens.elem_count || macro->tokens.elems[i + 1].tag == TOKEN_CONCAT) {
+                    log_error(preprocessor->log, &macro->loc, "invalid use of concatenation operator '##'");
+                    return false;
+                }
+                break;
+            default:
+                break;
         }
     }
     return true;

@@ -9,8 +9,10 @@ int VAR_DECL(int i) { return i; }
 #define VAR_DECL(x) int y = x
 
 #define ID(x) x
+#define IGNORE(x, y)
 
 shader test() {
+    IGNORE(,)
     foo(1, 2);
     VAR_DECL(VAR_DECL) (2); // Expands to int y = VAR_DECL(2);
     int i = ID(ID(1));      // Expands to int i = 1;

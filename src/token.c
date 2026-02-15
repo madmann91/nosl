@@ -37,12 +37,3 @@ bool token_tag_is_keyword(enum token_tag tag) {
             return false;
     }
 }
-
-struct token token_concat(const struct token* left, const struct token* right) {
-    if (token_tag_is_keyword(left->tag) || left->tag == TOKEN_IDENT) {
-        // Accept numbers, identifiers, or keywords
-        if (token_tag_is_keyword(right->tag) || right->tag == TOKEN_IDENT || right->tag == TOKEN_INT_LITERAL) {
-            // The result may be a keyword, or an identifier
-        }
-    }
-}

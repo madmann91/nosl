@@ -1,6 +1,8 @@
 #define TEST_VA_0(...) f(__VA_ARGS__)
 #define TEST_VA_1(x, ...) f(x, __VA_ARGS__)
 #define TEST_VA_2(x, y, ...) f(x, y, __VA_ARGS__)
+#define TEST_NO_ARG(x, ...) IGNORE(x, __VA_ARGS__)
+#define IGNORE(x, y)
 
 int f() {}
 int f(int x) {}
@@ -8,6 +10,7 @@ int f(int x, int y) {}
 int f(int x, int y, int z) {}
 
 shader foo() {
+    TEST_NO_ARG(,)
     TEST_VA_0(1);
     TEST_VA_0(1, 2);
     TEST_VA_1(1, 2);
