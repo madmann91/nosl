@@ -204,6 +204,13 @@ static inline struct const_eval eval_const_int(struct type_checker*, struct ast*
 }
 
 static inline bool is_safely_coercible_int_literal(struct type_checker* type_checker, struct ast* ast) {
+    if (ast->tag == AST_PAREN_EXPR) {
+        return is_safely_coercible_int_literal(type_checker, ast->paren_expr.inner_expr);
+    } if (ast->tag == AST_TERNARY_EXPR) {
+        return
+            is_safely_coercible_int_literal(type_checker, ast->ternary_expr.then_expr) &&
+            is_safely_coercible_int_literal(type_checker, ast->ternary_expr.else_expr);
+    }
     struct const_eval const_eval = eval_const_int(type_checker, ast);
     return const_eval.is_const && ((int)((float)const_eval.int_val)) == const_eval.int_val;
 }
