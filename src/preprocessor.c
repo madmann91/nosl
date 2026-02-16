@@ -480,9 +480,13 @@ static inline struct context* expand_macro_with_args(
             if (macro_token.macro_param_index >= arg_count)
                 continue;
 
-            const struct token_vec* expanded_arg_tokens = expand_macro_arg(preprocessor, &args[macro_token.macro_param_index]);
-            expanded_tokens = expanded_arg_tokens->elems;
-            num_expanded_tokens = expanded_arg_tokens->elem_count;
+            const struct token_vec* arg_tokens = &args[macro_token.macro_param_index].unexpanded_tokens;
+            const bool should_concat_right = i + 1 < macro->tokens.elem_count && macro->tokens.elems[i + 1].tag == TOKEN_CONCAT;
+            if (!should_concat && !should_concat_right)
+                arg_tokens = expand_macro_arg(preprocessor, &args[macro_token.macro_param_index]);
+
+            expanded_tokens     = arg_tokens->elems;
+            num_expanded_tokens = arg_tokens->elem_count;
         } else if (macro_token.tag == TOKEN_CONCAT) {
             should_concat = true;
             concat_loc = macro_token.loc;

@@ -51,6 +51,8 @@ add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/define.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/variadic_macros.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/ignore_va_args.osl")
 
+add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/concat.osl")
+
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/stringify.osl" ARGS --print-ast REGEX
     REGEX ".*\
 string s1 = \"1\";.*\

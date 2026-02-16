@@ -1,0 +1,34 @@
+#define CAT(x, y) x ## y
+#define FIXED ERROR
+#define CAT_FIXED(x) x ## FIXED
+#define PREPEND_FIXED(x) FIXED ## x
+shader foo() {
+    {
+        int i1 = 0;
+        CAT(i, 1) = 1;
+    }
+    {
+        int i = 0;
+        CAT(, i) = CAT(,1);
+    }
+    {
+        int i = 0;
+        CAT(i,) = CAT(1,);
+    }
+    {
+        int xFIXED = 0;
+        CAT_FIXED(x) = 1;
+    }
+    {
+        int FIXEDx = 0;
+        PREPEND_FIXED(x) = 1;
+    }
+    {
+        int xFIXED = 0;
+        CAT(x, FIXED) = 1;
+    }
+    {
+        int FIXEDx = 0;
+        CAT(FIXED, x) = 1;
+    }
+}
