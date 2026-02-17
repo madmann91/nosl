@@ -194,6 +194,7 @@ struct ast {
             const char* name;
             struct ast* dim;
             struct ast* init;
+            bool is_global;
         } var;
         struct {
             struct ast* type;
@@ -278,6 +279,7 @@ struct ast_print_options {
     size_t indent;
 };
 
+VEC_DECL(ast_vec, struct ast*, PUBLIC)
 SMALL_VEC_DECL(small_ast_vec, struct ast*, PUBLIC)
 
 [[nodiscard]] bool unary_expr_tag_is_postfix(enum unary_expr_tag);
@@ -295,7 +297,9 @@ void ast_print(FILE*, const struct ast*, const struct ast_print_options*);
 void ast_dump(const struct ast*);
 
 [[nodiscard]] bool ast_is_mutable(const struct ast*);
+[[nodiscard]] bool ast_is_global_var(const struct ast*);
 [[nodiscard]] size_t ast_list_size(const struct ast*);
+[[nodiscard]] struct ast* ast_list_last(struct ast*);
 [[nodiscard]] size_t ast_field_count(const struct ast*);
 [[nodiscard]] const char* ast_decl_name(const struct ast*);
 [[nodiscard]] struct ast* ast_skip_parens(struct ast*);

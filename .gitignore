@@ -6,3 +6,4 @@ build/
 *.lib
 *.dll
 tags
+src/builtins.osl.preprocessed

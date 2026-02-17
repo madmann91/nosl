@@ -17,5 +17,23 @@ target_link_libraries(libnosl PUBLIC
     overture_str_pool
     overture_file)
 
+# Build a version of noslc without builtins.
+add_executable(noslc_without_builtins main.c)
+target_link_libraries(noslc_without_builtins PRIVATE libnosl)
+
+# Preprocess builtins using the version of noslc above.
+# FIXME: Currently, CMake does not allow setting the search paths for #embed, so we need to generate
+# the file in the current source directory.
+add_custom_command(
+    OUTPUT builtins.osl.preprocessed
+    DEPENDS noslc_without_builtins builtins.osl
+    COMMAND noslc_without_builtins builtins.osl --print-ast > builtins.osl.preprocessed
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_custom_target(generate_builtins DEPENDS builtins.osl.preprocessed)
+
+# Build the final version of noslc, with builtins embedded as a string.
 add_executable(noslc main.c)
-target_link_libraries(noslc PUBLIC libnosl)
+add_dependencies(noslc generate_builtins)
+target_compile_definitions(noslc PRIVATE -DENABLE_BUILTINS)
+target_link_libraries(noslc PRIVATE libnosl)

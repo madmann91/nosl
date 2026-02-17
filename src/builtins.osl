@@ -1,0 +1,718 @@
+// This file contains all the functions of the standard library and constructors for standard types.
+// Some attributes are used to control how these built-in functions are implemented:
+//
+// - Functions marked with `__attribute__((builtin))`: Those functions do not have a body, and it is
+//   assumed that the backend knows how to emit code for them.
+//
+// - Functions marked with `__attribute__((constructor))`: Those functions are not callable like
+//   regular functions, but can only be called via "constructor expressions" (e.g. `color(1)`).
+//   Their name does not matter, as they are not considered when calling functions. Instead, they
+//   are connected to the type that they return, and thus must return a primitive type.
+//
+// - Functions marked with `__attribute__((always_inline))`: Those functions will always get inlined
+//   in the generated code, to minimize the code size and maximize its speed.
+
+// Internal macros --------------------------------------------------------------------------------
+
+#define PARAMS_1(type) type x
+#define PARAMS_2(type) type x, type y
+#define PARAMS_3(type) type x, type y, type z
+#define PARAMS_4(type) type x, type y, type z, type w
+
+#define ARGS_1(i) x[i]
+#define ARGS_2(i) x[i], y[i]
+#define ARGS_3(i) x[i], y[i], z[i]
+#define ARGS_4(i) x[i], y[i], z[i], w[i]
+
+#define PER_COMPONENT(type, func, params, args) \
+    __attribute__((always_inline)) type func(params(type)) { return { func(args(0)), func(args(1)), func(args(2)) }; }
+
+#define PER_COMPONENT_N(type, func, n) \
+    PER_COMPONENT(type, func, PARAMS_##n, ARGS_##n)
+
+#define PER_TRIPLE(inst, ...) \
+    inst(vector, __VA_ARGS__) \
+    inst(point, __VA_ARGS__) \
+    inst(normal, __VA_ARGS__) \
+    inst(color, __VA_ARGS__)
+
+#define DET2(m00, m01, m10, m11) (m00 * m01 - m10 * m11)
+#define DET3(m00, m01, m02, m10, m11, m12, m20, m21, m22) \
+    (m00 * DET2(m11, m12, m21, m22) - \
+     m01 * DET2(m10, m12, m20, m22) + \
+     m02 * DET2(m10, m11, m20, m21))
+#define DET4(m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23, m30, m31, m32, m33) \
+    (m00 * DET3(m11, m12, m13, m21, m22, m23, m31, m32, m33) - \
+     m01 * DET3(m10, m12, m13, m20, m22, m23, m30, m32, m33) + \
+     m02 * DET3(m10, m11, m13, m20, m21, m23, m30, m31, m33) - \
+     m03 * DET3(m10, m11, m12, m20, m21, m22, m30, m31, m32))
+
+
+// Constants --------------------------------------------------------------------------------------
+
+#define M_PI       3.1415926535897932
+#define M_PI_2     1.5707963267948966
+#define M_PI_4     0.7853981633974483
+#define M_2_PI     0.6366197723675813
+#define M_2PI      6.2831853071795865
+#define M_4PI     12.566370614359173
+#define M_2_SQRTPI 1.1283791670955126
+#define M_E        2.7182818284590452
+#define M_LN2      0.6931471805599453
+#define M_LN10     2.3025850929940457
+#define M_LOG2E    1.4426950408889634
+#define M_LOG10E   0.4342944819032518
+#define M_SQRT2    1.4142135623730950
+#define M_SQRT1_2  0.7071067811865475
+
+// Global variables -------------------------------------------------------------------------------
+
+__attribute__((builtin)) point P;
+__attribute__((builtin)) vector I;
+__attribute__((builtin)) normal N;
+__attribute__((builtin)) normal Ng;
+__attribute__((builtin)) float u;
+__attribute__((builtin)) float v;
+__attribute__((builtin)) vector dPdu;
+__attribute__((builtin)) vector dPdv;
+__attribute__((builtin)) point Ps;
+__attribute__((builtin)) float time;
+__attribute__((builtin)) float dtime;
+__attribute__((builtin)) float dPdtime;
+__attribute__((builtin)) closure color Ci;
+
+// String functions -------------------------------------------------------------------------------
+
+__attribute__((builtin)) void printf(string, ...);
+__attribute__((builtin)) void error(string, ...);
+__attribute__((builtin)) void warning(string, ...);
+__attribute__((builtin)) string format(string, ...);
+__attribute__((builtin)) void fprintf(string, string, ...);
+__attribute__((builtin)) string concat(string, string);
+__attribute__((builtin)) int strlen(string);
+__attribute__((builtin)) bool startswith(string, string);
+__attribute__((builtin)) bool endswith(string, string);
+__attribute__((builtin)) int stoi(string);
+__attribute__((builtin)) float stof(string);
+__attribute__((builtin)) string substr(string, int);
+__attribute__((builtin)) string substr(string, int, int);
+__attribute__((builtin)) int split(string, output string[], string);
+__attribute__((always_inline)) int split(string str, output string results[]) { return split(str, results, ""); }
+__attribute__((builtin)) int split(string, output string[], int);
+__attribute__((builtin)) int getchar(string, int);
+__attribute__((builtin)) int hash(string);
+__attribute__((builtin)) int regex_search(string, string);
+__attribute__((builtin)) int regex_search(string, int[], string);
+__attribute__((builtin)) int regex_match(string, string);
+__attribute__((builtin)) int regex_match(string, int[], string);
+
+// Bool functions ---------------------------------------------------------------------------------
+
+__attribute__((builtin)) bool __operator__bitand__(bool, bool);
+__attribute__((builtin)) bool __operator__xor__(bool, bool);
+__attribute__((builtin)) bool __operator__bitor__(bool, bool);
+__attribute__((builtin)) bool __operator__eq__(bool, bool);
+__attribute__((builtin)) bool __operator__ne__(bool, bool);
+__attribute__((builtin)) bool __operator__not__(bool);
+__attribute__((builtin)) bool __operator__compl__(bool);
+
+__attribute__((always_inline, constructor)) bool __construct__(bool b) { return b; }
+__attribute__((always_inline, constructor)) bool __construct__(int i) { return (bool)i; }
+__attribute__((always_inline, constructor)) bool __construct__(float f) { return (bool)f; }
+
+// Int functions ----------------------------------------------------------------------------------
+
+__attribute__((builtin)) int __operator__add__(int, int);
+__attribute__((builtin)) int __operator__sub__(int, int);
+__attribute__((builtin)) int __operator__mul__(int, int);
+__attribute__((builtin)) int __operator__mod__(int, int);
+__attribute__((builtin)) int __operator__div__(int, int);
+__attribute__((builtin)) int __operator__shl__(int, int);
+__attribute__((builtin)) int __operator__shr__(int, int);
+__attribute__((builtin)) int __operator__bitand__(int, int);
+__attribute__((builtin)) int __operator__xor__(int, int);
+__attribute__((builtin)) int __operator__bitor__(int, int);
+__attribute__((builtin)) bool __operator__eq__(int, int);
+__attribute__((builtin)) bool __operator__ne__(int, int);
+__attribute__((builtin)) bool __operator__gt__(int, int);
+__attribute__((builtin)) bool __operator__ge__(int, int);
+__attribute__((builtin)) bool __operator__lt__(int, int);
+__attribute__((builtin)) bool __operator__le__(int, int);
+__attribute__((builtin)) int __operator__neg__(int);
+__attribute__((builtin)) int __operator__not__(int);
+__attribute__((builtin)) int __operator__compl__(int);
+__attribute__((builtin)) int __operator__pre_inc__(output int);
+__attribute__((builtin)) int __operator__pre_dec__(output int);
+__attribute__((builtin)) int __operator__post_inc__(output int);
+__attribute__((builtin)) int __operator__post_dec__(output int);
+
+__attribute__((always_inline, constructor)) int __construct__(bool b) { return (int)b; }
+__attribute__((always_inline, constructor)) int __construct__(int i) { return i; }
+__attribute__((always_inline, constructor)) int __construct__(float f) { return (int)f; }
+
+// Float functions --------------------------------------------------------------------------------
+
+__attribute__((builtin)) float __operator__add__(float, float);
+__attribute__((builtin)) float __operator__sub__(float, float);
+__attribute__((builtin)) float __operator__mul__(float, float);
+__attribute__((builtin)) float __operator__div__(float, float);
+__attribute__((builtin)) bool __operator__eq__(float, float);
+__attribute__((builtin)) bool __operator__ne__(float, float);
+__attribute__((builtin)) bool __operator__gt__(float, float);
+__attribute__((builtin)) bool __operator__ge__(float, float);
+__attribute__((builtin)) bool __operator__lt__(float, float);
+__attribute__((builtin)) bool __operator__le__(float, float);
+__attribute__((builtin)) float __operator__neg__(float);
+__attribute__((builtin)) float __operator__pre_inc__(output float);
+__attribute__((builtin)) float __operator__pre_dec__(output float);
+__attribute__((builtin)) float __operator__post_inc__(output float);
+__attribute__((builtin)) float __operator__post_dec__(output float);
+
+__attribute__((always_inline, constructor)) float __construct__(bool b) { return (float)b; }
+__attribute__((always_inline, constructor)) float __construct__(int i) { return (float)i; }
+__attribute__((always_inline, constructor)) float __construct__(float f) { return f; }
+
+// Triple functions -------------------------------------------------------------------------------
+
+#define TRIPLE_OPERATORS(type, ignored) \
+    __attribute__((always_inline)) type __operator__add__(type x, type y) { return { x[0] + y[0], x[1] + y[1], x[2] + y[2] }; } \
+    __attribute__((always_inline)) vector __operator__sub__(type x, type y) { return { x[0] - y[0], x[1] - y[1], x[2] - y[2] }; } \
+    __attribute__((always_inline)) type __operator__mul__(type x, type y) { return { x[0] * y[0], x[1] * y[1], x[2] * y[2] }; } \
+    __attribute__((always_inline)) type __operator__mul__(float x, type y) { return { x * y[0], x * y[1], x * y[2] }; } \
+    __attribute__((always_inline)) type __operator__mul__(type x, float y) { return y * x; } \
+    __attribute__((always_inline)) type __operator__div__(type x, type y) { return { x[0] / y[0], x[1] / y[1], x[2] / y[2] }; } \
+    __attribute__((always_inline)) bool __operator__eq__(type x, type y) { return x[0] == y[0] && x[1] == y[1] && x[2] == y[2]; } \
+    __attribute__((always_inline)) bool __operator__ne__(type x, type y) { return !(x == y); } \
+    __attribute__((always_inline)) vector __operator__neg__(type x) { return { -x[0], -x[1], -x[2] }; }
+
+PER_TRIPLE(TRIPLE_OPERATORS,)
+
+#undef TRIPLE_OPERATORS
+
+// Allow adding a point and a vector together.
+__attribute__((always_inline)) point __operator__add__(point p, vector v) { return p + (point)v; }
+__attribute__((always_inline)) point __operator__add__(vector v, point p) { return p + v; }
+
+__attribute__((constructor, always_inline)) vector __construct__(float x) { return x; }
+__attribute__((constructor, always_inline)) point  __construct__(float x) { return x; }
+__attribute__((constructor, always_inline)) normal __construct__(float x) { return x; }
+
+__attribute__((constructor, always_inline)) vector __construct__(float x, float y, float z) { return { x, y, z }; }
+__attribute__((constructor, always_inline)) point  __construct__(float x, float y, float z) { return { x, y, z }; }
+__attribute__((constructor, always_inline)) normal __construct__(float x, float y, float z) { return { x, y, z }; }
+
+// Color functions --------------------------------------------------------------------------------
+
+__attribute__((builtin)) float luminance(color);
+__attribute__((builtin)) color blackbody(float);
+__attribute__((builtin)) color wavelength_color(float);
+__attribute__((builtin)) color transformc(string, string, color);
+__attribute__((always_inline)) color transformc(string space, color c) { return transformc("rgb", space, c); }
+
+__attribute__((constructor, always_inline)) color __construct__(float intensity) {
+    return intensity;
+}
+
+__attribute__((constructor, always_inline)) color __construct__(float r, float g, float b) {
+    return { r, g, b };
+}
+
+__attribute__((constructor, always_inline)) color __construct__(string space, float intensity) {
+    return transformc(space, "rgb", color(intensity));
+}
+
+__attribute__((constructor, always_inline)) color __construct__(string space, float r, float g, float b) {
+    return transformc(space, "rgb", color(r, g, b));
+}
+
+// Matrix functions -------------------------------------------------------------------------------
+
+__attribute__((builtin)) int getmatrix(string, string, output matrix);
+
+__attribute__((always_inline)) matrix __operator__add__(matrix a, matrix b) {
+    return {
+        a[0][0] + b[0][0], a[0][1] + b[0][1], a[0][2] + b[0][2], a[0][3] + b[0][3],
+        a[1][0] + b[1][0], a[1][1] + b[1][1], a[1][2] + b[1][2], a[1][3] + b[1][3],
+        a[2][0] + b[2][0], a[2][1] + b[2][1], a[2][2] + b[2][2], a[2][3] + b[2][3],
+        a[3][0] + b[3][0], a[3][1] + b[3][1], a[3][2] + b[3][2], a[3][3] + b[3][3]
+    };
+}
+
+__attribute__((always_inline)) matrix __operator__sub__(matrix a, matrix b) {
+    return {
+        a[0][0] - b[0][0], a[0][1] - b[0][1], a[0][2] - b[0][2], a[0][3] - b[0][3],
+        a[1][0] - b[1][0], a[1][1] - b[1][1], a[1][2] - b[1][2], a[1][3] - b[1][3],
+        a[2][0] - b[2][0], a[2][1] - b[2][1], a[2][2] - b[2][2], a[2][3] - b[2][3],
+        a[3][0] - b[3][0], a[3][1] - b[3][1], a[3][2] - b[3][2], a[3][3] - b[3][3]
+    };
+}
+
+__attribute__((always_inline)) matrix __operator__mul__(matrix a, matrix b) {
+    return {
+        a[0][0] * b[0][0] + a[0][1] * b[1][0] + a[0][2] * b[2][0] + a[0][3] * b[3][0],
+        a[0][0] * b[0][1] + a[0][1] * b[1][1] + a[0][2] * b[2][1] + a[0][3] * b[3][1],
+        a[0][0] * b[0][2] + a[0][1] * b[1][2] + a[0][2] * b[2][2] + a[0][3] * b[3][2],
+        a[0][0] * b[0][3] + a[0][1] * b[1][3] + a[0][2] * b[2][3] + a[0][3] * b[3][3],
+
+        a[1][0] * b[0][0] + a[1][1] * b[1][0] + a[1][2] * b[2][0] + a[1][3] * b[3][0],
+        a[1][0] * b[0][1] + a[1][1] * b[1][1] + a[1][2] * b[2][1] + a[1][3] * b[3][1],
+        a[1][0] * b[0][2] + a[1][1] * b[1][2] + a[1][2] * b[2][2] + a[1][3] * b[3][2],
+        a[1][0] * b[0][3] + a[1][1] * b[1][3] + a[1][2] * b[2][3] + a[1][3] * b[3][3],
+
+        a[2][0] * b[0][0] + a[2][1] * b[1][0] + a[2][2] * b[2][0] + a[2][3] * b[3][0],
+        a[2][0] * b[0][1] + a[2][1] * b[1][1] + a[2][2] * b[2][1] + a[2][3] * b[3][1],
+        a[2][0] * b[0][2] + a[2][1] * b[1][2] + a[2][2] * b[2][2] + a[2][3] * b[3][2],
+        a[2][0] * b[0][3] + a[2][1] * b[1][3] + a[2][2] * b[2][3] + a[2][3] * b[3][3],
+
+        a[3][0] * b[0][0] + a[3][1] * b[1][0] + a[3][2] * b[2][0] + a[3][3] * b[3][0],
+        a[3][0] * b[0][1] + a[3][1] * b[1][1] + a[3][2] * b[2][1] + a[3][3] * b[3][1],
+        a[3][0] * b[0][2] + a[3][1] * b[1][2] + a[3][2] * b[2][2] + a[3][3] * b[3][2],
+        a[3][0] * b[0][3] + a[3][1] * b[1][3] + a[3][2] * b[2][3] + a[3][3] * b[3][3]
+    };
+}
+
+__attribute__((always_inline)) matrix __operator__mul__(float f, matrix m) {
+    return {
+        m[0][0] * f, m[0][1] * f, m[0][2] * f, m[0][3] * f,
+        m[1][0] * f, m[1][1] * f, m[1][2] * f, m[1][3] * f,
+        m[2][0] * f, m[2][1] * f, m[2][2] * f, m[2][3] * f,
+        m[3][0] * f, m[3][1] * f, m[3][2] * f, m[3][3] * f
+    };
+}
+
+__attribute__((always_inline)) matrix __operator__mul__(matrix m, float f) {
+    return f * m;
+}
+
+__attribute__((constructor, always_inline)) matrix __construct__(float x) { return x; }
+
+__attribute__((constructor, always_inline))
+matrix __construct__(
+    float m00, float m01, float m02, float m03,
+    float m10, float m11, float m12, float m13,
+    float m20, float m21, float m22, float m23,
+    float m30, float m31, float m32, float m33)
+{
+    return { m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23, m30, m31, m32, m33 };
+}
+
+__attribute__((constructor, always_inline)) matrix __construct__(string from, string to) {
+    matrix result = 1;
+    if (getmatrix(from, to, result) == 0)
+        error("cannot construct matrix from space %s to %s", from, to);
+    return result;
+}
+
+__attribute__((constructor, always_inline)) matrix __construct__(string space, float x) {
+    return matrix(space, "common") * x;
+}
+
+__attribute__((constructor, always_inline))
+matrix __construct__(
+    string space,
+    float m00, float m01, float m02, float m03,
+    float m10, float m11, float m12, float m13,
+    float m20, float m21, float m22, float m23,
+    float m30, float m31, float m32, float m33)
+{
+    return matrix(space, "common") * {
+        m00, m01, m02, m03,
+        m10, m11, m12, m13,
+        m20, m21, m22, m23,
+        m30, m31, m32, m33
+    };
+}
+
+__attribute__((always_inline)) float determinant(matrix m) {
+    return DET4(
+        m[0][0], m[0][1], m[0][2], m[0][3],
+        m[1][0], m[1][1], m[1][2], m[1][3],
+        m[2][0], m[2][1], m[2][2], m[2][3],
+        m[3][0], m[3][1], m[3][2], m[3][3]);
+}
+
+__attribute__((always_inline)) matrix inverse(matrix m) {
+    float det = determinant(m);
+    if (det == 0)
+        return 1;
+
+    matrix inv;
+    float inv_det = 1.0 / det;
+
+    inv[0][0] =  inv_det * DET3(m[1][1], m[1][2], m[1][3], m[2][1], m[2][2], m[2][3], m[3][1], m[3][2], m[3][3]);
+    inv[0][1] = -inv_det * DET3(m[1][0], m[1][2], m[1][3], m[2][0], m[2][2], m[2][3], m[3][0], m[3][2], m[3][3]);
+    inv[0][2] =  inv_det * DET3(m[1][0], m[1][1], m[1][3], m[2][0], m[2][1], m[2][3], m[3][0], m[3][1], m[3][3]);
+    inv[0][3] = -inv_det * DET3(m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2], m[3][0], m[3][1], m[3][2]);
+
+    inv[1][0] = -inv_det * DET3(m[0][1], m[0][2], m[0][3], m[2][1], m[2][2], m[2][3], m[3][1], m[3][2], m[3][3]);
+    inv[1][1] =  inv_det * DET3(m[0][0], m[0][2], m[0][3], m[2][0], m[2][2], m[2][3], m[3][0], m[3][2], m[3][3]);
+    inv[1][2] = -inv_det * DET3(m[0][0], m[0][1], m[0][3], m[2][0], m[2][1], m[2][3], m[3][0], m[3][1], m[3][3]);
+    inv[1][3] =  inv_det * DET3(m[0][0], m[0][1], m[0][2], m[2][0], m[2][1], m[2][2], m[3][0], m[3][1], m[3][2]);
+
+    inv[2][0] =  inv_det * DET3(m[0][1], m[0][2], m[0][3], m[1][1], m[1][2], m[1][3], m[3][1], m[3][2], m[3][3]);
+    inv[2][1] = -inv_det * DET3(m[0][0], m[0][2], m[0][3], m[1][0], m[1][2], m[1][3], m[3][0], m[3][2], m[3][3]);
+    inv[2][2] =  inv_det * DET3(m[0][0], m[0][1], m[0][3], m[1][0], m[1][1], m[1][3], m[3][0], m[3][1], m[3][3]);
+    inv[2][3] = -inv_det * DET3(m[0][0], m[0][1], m[0][2], m[1][0], m[1][1], m[1][2], m[3][0], m[3][1], m[3][2]);
+
+    inv[3][0] = -inv_det * DET3(m[0][1], m[0][2], m[0][3], m[1][1], m[1][2], m[1][3], m[2][1], m[2][2], m[2][3]);
+    inv[3][1] =  inv_det * DET3(m[0][0], m[0][2], m[0][3], m[1][0], m[1][2], m[1][3], m[2][0], m[2][2], m[2][3]);
+    inv[3][2] = -inv_det * DET3(m[0][0], m[0][1], m[0][3], m[1][0], m[1][1], m[1][3], m[2][0], m[2][1], m[2][3]);
+    inv[3][3] =  inv_det * DET3(m[0][0], m[0][1], m[0][2], m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2]);
+
+    return inv;
+}
+
+__attribute__((always_inline)) matrix __operator__div__(matrix m, matrix n) {
+    return m * inverse(n);
+}
+
+__attribute__((always_inline)) matrix transpose(matrix m) {
+    return {
+        m[0][0], m[1][0], m[2][0], m[3][0],
+        m[0][1], m[1][1], m[2][1], m[3][1],
+        m[0][2], m[1][2], m[2][2], m[3][2],
+        m[0][3], m[1][3], m[2][3], m[3][3]
+    };
+}
+
+// Math functions ---------------------------------------------------------------------------------
+
+__attribute__((always_inline)) float radians(float x) { return x * (M_PI / 180.); }
+__attribute__((always_inline)) float degrees(float x) { return x * (180. / M_PI); }
+
+__attribute__((builtin)) float cos(float);
+__attribute__((builtin)) float sin(float);
+__attribute__((builtin)) void sincos(float, output float, output float);
+__attribute__((builtin)) float tan(float);
+__attribute__((builtin)) float cosh(float);
+__attribute__((builtin)) float sinh(float);
+__attribute__((builtin)) float tanh(float);
+__attribute__((builtin)) float acos(float);
+__attribute__((builtin)) float asin(float);
+__attribute__((builtin)) float atan(float);
+__attribute__((builtin)) float atan2(float, float);
+__attribute__((builtin)) float pow(float, float);
+__attribute__((builtin)) float exp(float);
+__attribute__((builtin)) float exp2(float);
+__attribute__((builtin)) float expm1(float);
+__attribute__((builtin)) float log(float);
+__attribute__((builtin)) float log2(float);
+__attribute__((builtin)) float log10(float);
+__attribute__((builtin)) float logb(float);
+__attribute__((builtin)) float log(float, float);
+__attribute__((builtin)) float sqrt(float);
+__attribute__((builtin)) float inversesqrt(float);
+__attribute__((builtin)) float cbrt(float);
+__attribute__((builtin)) float abs(float);
+__attribute__((builtin)) float floor(float);
+__attribute__((builtin)) float ceil(float);
+__attribute__((builtin)) float round(float);
+__attribute__((builtin)) float trunc(float);
+__attribute__((always_inline)) float fabs(float x) { return abs(x); }
+__attribute__((always_inline)) float sign(float x) { return x > 0. ? 1. : (x < 0. ? -1. : 0.); }
+__attribute__((builtin)) float mod(float, float);
+__attribute__((builtin)) float fmod(float, float);
+__attribute__((builtin)) float min(float, float);
+__attribute__((builtin)) float max(float, float);
+__attribute__((always_inline)) float clamp(float x, float minval, float maxval) { return min(max(x, minval), maxval); }
+__attribute__((always_inline)) float mix(float x, float y, float alpha) { return x * (1 - alpha) + y * alpha; }
+__attribute__((builtin)) float select(float, float, bool);
+
+__attribute__((always_inline)) float hypot(float x, float y) { return sqrt(x * x + y * y); }
+__attribute__((always_inline)) float hypot(float x, float y, float z) { return sqrt(x * x + y * y + z * z); }
+__attribute__((builtin)) bool isnan(float);
+__attribute__((builtin)) bool isinf(float);
+__attribute__((builtin)) bool isfinite(float);
+__attribute__((builtin)) float erf(float);
+__attribute__((builtin)) float erfc(float);
+
+// Instantiate those functions per-component for each triple type.
+
+PER_TRIPLE(PER_COMPONENT_N, radians, 1)
+PER_TRIPLE(PER_COMPONENT_N, degrees, 1)
+PER_TRIPLE(PER_COMPONENT_N, cos, 1)
+PER_TRIPLE(PER_COMPONENT_N, sin, 1)
+PER_TRIPLE(PER_COMPONENT_N, tan, 1)
+PER_TRIPLE(PER_COMPONENT_N, cosh, 1)
+PER_TRIPLE(PER_COMPONENT_N, sinh, 1)
+PER_TRIPLE(PER_COMPONENT_N, tanh, 1)
+PER_TRIPLE(PER_COMPONENT_N, acos, 1)
+PER_TRIPLE(PER_COMPONENT_N, asin, 1)
+PER_TRIPLE(PER_COMPONENT_N, atan, 1)
+PER_TRIPLE(PER_COMPONENT_N, exp, 1)
+PER_TRIPLE(PER_COMPONENT_N, exp2, 1)
+PER_TRIPLE(PER_COMPONENT_N, expm1, 1)
+PER_TRIPLE(PER_COMPONENT_N, log, 1)
+PER_TRIPLE(PER_COMPONENT_N, log2, 1)
+PER_TRIPLE(PER_COMPONENT_N, log10, 1)
+PER_TRIPLE(PER_COMPONENT_N, logb, 1)
+PER_TRIPLE(PER_COMPONENT_N, sqrt, 1)
+PER_TRIPLE(PER_COMPONENT_N, inversesqrt, 1)
+PER_TRIPLE(PER_COMPONENT_N, cbrt, 1)
+PER_TRIPLE(PER_COMPONENT_N, abs, 1)
+PER_TRIPLE(PER_COMPONENT_N, fabs, 1)
+PER_TRIPLE(PER_COMPONENT_N, sign, 1)
+PER_TRIPLE(PER_COMPONENT_N, floor, 1)
+PER_TRIPLE(PER_COMPONENT_N, ceil, 1)
+PER_TRIPLE(PER_COMPONENT_N, round, 1)
+PER_TRIPLE(PER_COMPONENT_N, trunc, 1)
+
+PER_TRIPLE(PER_COMPONENT_N, atan2, 2)
+PER_TRIPLE(PER_COMPONENT_N, pow, 2)
+PER_TRIPLE(PER_COMPONENT_N, log, 2)
+PER_TRIPLE(PER_COMPONENT_N, mod, 2)
+PER_TRIPLE(PER_COMPONENT_N, fmod, 2)
+PER_TRIPLE(PER_COMPONENT_N, min, 2)
+PER_TRIPLE(PER_COMPONENT_N, max, 2)
+
+PER_TRIPLE(PER_COMPONENT_N, mix, 3)
+PER_TRIPLE(PER_COMPONENT_N, select, 3)
+
+#define SINCOS(type, ignored) \
+    __attribute__((always_inline)) void sincos(type x, output type y, output type z) { \
+        sincos(x[0], y[0], z[0]); \
+        sincos(x[1], y[1], z[1]); \
+        sincos(x[2], y[2], z[2]); \
+    }
+
+PER_TRIPLE(SINCOS,)
+
+#undef SINCOS
+
+// Geometric functions ----------------------------------------------------------------------------
+
+__attribute__((always_inline)) float dot(vector a, vector b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+__attribute__((always_inline)) vector cross(vector a, vector b) {
+    return {
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+    };
+}
+
+__attribute__((always_inline)) vector transform(matrix m, vector v) {
+    return {
+        v[0] * m[0][0] + v[1] * m[0][1] + v[2] * m[0][2],
+        v[0] * m[1][0] + v[1] * m[1][1] + v[2] * m[1][2],
+        v[0] * m[2][0] + v[1] * m[2][1] + v[2] * m[2][2]
+    };
+}
+
+__attribute__((always_inline)) vector transform(matrix m, point p) {
+    return {
+        p[0] * m[0][0] + p[1] * m[0][1] + p[2] * m[0][2] + m[0][3],
+        p[0] * m[1][0] + p[1] * m[1][1] + p[2] * m[1][2] + m[1][3],
+        p[0] * m[2][0] + p[1] * m[2][1] + p[2] * m[2][2] + m[2][3]
+    };
+}
+
+__attribute__((always_inline)) normal transform(matrix m, normal n) {
+    return transform(transpose(inverse(m)), n);
+}
+
+__attribute__((always_inline)) vector transform(string from, string to, vector v) { return transform(matrix(from, to), v); }
+__attribute__((always_inline)) point  transform(string from, string to, point  p) { return transform(matrix(from, to), p); }
+__attribute__((always_inline)) normal transform(string from, string to, normal n) { return transform(matrix(from, to), n); }
+
+__attribute__((constructor, always_inline)) vector __construct__(string space, float x, float y, float z) { return transform(space, "common", vector(x, y, z)); }
+__attribute__((constructor, always_inline)) point  __construct__(string space, float x, float y, float z) { return transform(space, "common", point(x, y, z)); }
+__attribute__((constructor, always_inline)) normal __construct__(string space, float x, float y, float z) { return transform(space, "common", normal(x, y, z)); }
+
+__attribute__((constructor, always_inline)) vector __construct__(string space, float x) { return vector(space, x, x, x); }
+__attribute__((constructor, always_inline)) point  __construct__(string space, float x) { return point(space, x, x, x); }
+__attribute__((constructor, always_inline)) normal __construct__(string space, float x) { return normal(space, x, x, x); }
+
+__attribute__((always_inline)) vector transform(string space, vector v) { return transform("common", space, v); }
+__attribute__((always_inline)) point  transform(string space, point  p) { return transform("common", space, p); }
+__attribute__((always_inline)) normal transform(string space, normal n) { return transform("common", space, n); }
+
+__attribute__((always_inline)) float length(vector v) { return sqrt(dot(v, v)); }
+__attribute__((always_inline)) float distance(point a, point b) { return length(b - a); }
+
+__attribute__((always_inline)) float distance(point a, point b, point q) {
+    vector d = b - a;
+    float d2 = dot(d, d);
+    if (d2 == 0)
+        return distance(q, a);
+    float t = dot(q - a, d) / d2;
+    return distance(q, a + clamp(t, 0.0, 1.0) * d);
+}
+
+__attribute__((always_inline)) vector normalize(vector v) { return v * inversesqrt(dot(v, v)); }
+__attribute__((always_inline)) normal normalize(normal n) { return n * inversesqrt(dot(n, n)); }
+
+__attribute__((always_inline)) vector faceforward(vector N, vector I, vector Nref) {
+    return dot(I, Nref) > 0 ? -N : N;
+}
+
+__attribute__((always_inline)) vector faceforward(vector N, vector I) { return faceforward(N, I, Ng); }
+
+__attribute__((always_inline)) vector reflect(vector I, vector N) { return I - 2 * dot(N, I) * N; }
+
+__attribute__((always_inline)) vector refract(vector I, vector N, float eta) {
+    float IdotN = dot(I, N);
+    float k = 1 - eta * eta * (1 - IdotN * IdotN);
+    return k < 0 ? vector(0) : eta * I - N * (eta * IdotN + sqrt(k));
+}
+
+__attribute__((always_inline)) point rotate(point p, float angle, point a, point b) {
+    float c, s;
+    sincos(angle, c, s);
+    vector axis = normalize(b - a);
+    float x = axis[0], y = axis[1], z = axis[2];
+    matrix m = {
+        x * x + (1.0 - x * x) * c,
+        x * y * (1 - c) + z * s,
+        x * z * (1 - c) - y * s,
+        0.0,
+        x * y * (1 - c) - z * s,
+        y * y + (1.0 - y * y) * c,
+        y * z * (1 - c) + x * s,
+        0.0,
+        x * z * (1 - c) + y * s,
+        y * z * (1 - c) - x * s,
+        z * z + (1.0 - z * z) * c,
+        0.0,
+        0.0, 0.0, 0.0, 1.0
+    };
+    return transform(m, p - a) + a;
+}
+
+__attribute__((always_inline)) point rotate(point p, float angle, vector axis) { return rotate(p, angle, 0, axis); }
+
+__attribute__((builtin)) float transformu(string, float);
+__attribute__((builtin)) float transformu(string, string, float);
+
+// Derivatives and area operators -----------------------------------------------------------------
+
+__attribute__((builtin)) float Dx(float);
+__attribute__((builtin)) float Dy(float);
+__attribute__((builtin)) float Dz(float);
+
+__attribute__((builtin)) vector Dx(vector);
+__attribute__((builtin)) vector Dy(vector);
+__attribute__((builtin)) vector Dz(vector);
+
+__attribute__((builtin)) color Dx(color);
+__attribute__((builtin)) color Dy(color);
+__attribute__((builtin)) color Dz(color);
+
+__attribute__((builtin)) float filterwidth(float);
+__attribute__((builtin)) vector filterwidth(vector);
+
+__attribute__((builtin)) float area(point);
+
+__attribute__((builtin)) vector calculatenormal(point);
+
+__attribute__((always_inline)) float aastep(float edge, float s, float dedge, float ds) {
+    float width = abs(dedge) + abs(ds);
+    return clamp((s - edge) / width + 0.5, 0.0, 1.0);
+}
+
+__attribute__((always_inline)) float aastep(float edge, float s, float ds) { return aastep(edge, s, filterwidth(edge), ds); }
+__attribute__((always_inline)) float aastep(float edge, float s) { return aastep(edge, s, filterwidth(edge), filterwidth(s)); }
+
+// Bump and displacement --------------------------------------------------------------------------
+
+__attribute__((builtin)) void displace(string, float);
+__attribute__((always_inline)) void displace(float amplitude) { return displace("common", amplitude); }
+__attribute__((builtin)) void displace(vector);
+
+__attribute__((builtin)) void bump(string, float);
+__attribute__((always_inline)) void bump(float amplitude) { return bump("common", amplitude); }
+__attribute__((builtin)) void bump(vector);
+
+// Pattern generation -----------------------------------------------------------------------------
+
+__attribute__((always_inline)) float step(float edge, float x) { return x < edge ? 0 : 1; }
+__attribute__((always_inline)) float smoothstep(float edge0, float edge1, float x) {
+    float t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+float linearstep(float edge0, float edge1, float x) {
+    if (edge0 == edge1)
+        return step(edge0, x);
+
+    float xclamped = clamp(x, edge0, edge1);
+    return (xclamped - edge0) / (edge1 - edge0);
+}
+
+float smooth_linearstep(float edge0, float edge1, float x_, float eps_) {
+    if (edge0 == edge1)
+        return step(edge0, x_);
+
+    float width_inv = 1 / (edge1 - edge0);
+    float eps = eps_ * width_inv;
+    float x = (x_ - edge0) * width_inv;
+    if      (x <= -eps)                return 0;
+    else if (x >= eps && x <= 1 - eps) return x;
+    else if (x >= 1 + eps)             return 1;
+    else {
+        float y = x < eps ? x + eps : 1 + eps - x;
+        float z = (0.25 / eps) * y * y;
+        return x < eps ? z : 1 - z;
+    }
+}
+
+PER_TRIPLE(PER_COMPONENT_N, step, 2)
+
+PER_COMPONENT_N(vector, smoothstep, 3)
+PER_COMPONENT_N(color,  smoothstep, 3)
+PER_COMPONENT_N(vector, linearstep, 3)
+PER_COMPONENT_N(color,  linearstep, 3)
+PER_COMPONENT_N(vector, smooth_linearstep, 4)
+PER_COMPONENT_N(color,  smooth_linearstep, 4)
+
+// Fresnel function -------------------------------------------------------------------------------
+
+void fresnel(
+    vector I,
+    normal N,
+    float eta,
+    output float Kr,
+    output float Kt,
+    output vector R,
+    output vector T)
+{
+    float c = abs(dot(I, N));
+    R = reflect(I, N);
+
+    float g = 1 / (eta * eta) - 1 + c * c;
+    if (g < 0) {
+        Kr = 1;
+        Kt = 0;
+        T = 0;
+        return;
+    }
+
+    g = sqrt(g);
+    float beta = g - c;
+    float F = (c * (g + c) - 1) / (c * beta + 1);
+    F = 0.5 * (1 + F * F);
+    F *= beta * beta / ((g + c) * (g+c));
+    Kr = F;
+    Kt = (1 - F) * eta * eta;
+    T = refract(I, N, eta);
+}
+
+// Cleanup ----------------------------------------------------------------------------------------
+
+#undef DET2
+#undef DET3
+#undef DET4
+
+#undef PARAMS_1
+#undef PARAMS_2
+#undef PARAMS_3
+#undef PARAMS_4
+
+#undef ARGS_1
+#undef ARGS_2
+#undef ARGS_3
+#undef ARGS_4
+
+#undef PER_COMPONENT
+#undef PER_COMPONENT_N
+#undef PER_TRIPLE

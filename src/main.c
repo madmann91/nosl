@@ -2,8 +2,8 @@
 #include "check.h"
 #include "type_table.h"
 #include "preprocessor.h"
+#include "lexer.h"
 #include "ast.h"
-#include "builtins.h"
 
 #include <overture/cli.h>
 #include <overture/file.h>
@@ -77,8 +77,8 @@ static struct cli_option cli_option_multi_strings(
 
 static bool compile_file(
     const char* file_name,
+    struct ast* builtins,
     struct type_table* type_table,
-    const struct builtins* builtins,
     const struct options* options)
 {
     struct log log = {
@@ -96,9 +96,18 @@ static bool compile_file(
     }
 
     struct mem_pool mem_pool = mem_pool_create();
-    struct ast* program = parse(&mem_pool, preprocessor, &log);
+    struct ast* program = parse_with_preprocessor(&mem_pool, preprocessor, &log);
+
+    // If builtins are available, prepend them to the program.
+    struct ast* last_builtin = NULL;
+    if (builtins) {
+        last_builtin = ast_list_last(builtins);
+        last_builtin->next = program;
+        program = builtins;
+    }
+
     if (program) {
-        check(&mem_pool, type_table, builtins, program, &log);
+        check(&mem_pool, type_table, program, &log);
 
         if (options->print_ast) {
             ast_print(stdout, program, &(struct ast_print_options) {
@@ -106,6 +115,10 @@ static bool compile_file(
             });
         }
     }
+
+    // Remove builtins from the program.
+    if (last_builtin)
+        last_builtin->next = NULL;
 
     mem_pool_destroy(&mem_pool);
     preprocessor_close(preprocessor);
@@ -131,6 +144,33 @@ static bool parse_options(int argc, char** argv, struct options* options) {
     return true;
 }
 
+static struct ast* parse_builtins(
+    [[maybe_unused]] struct mem_pool* mem_pool,
+    [[maybe_unused]] struct type_table* type_table)
+{
+#ifdef ENABLE_BUILTINS
+    struct log log = {
+        .file = NULL,
+        .disable_colors = true,
+        .max_warns = 1,
+        .max_errors = 1
+    };
+
+    static const char builtins_data[] = {
+#embed "builtins.osl.preprocessed"
+        , 0
+    };
+
+    struct lexer lexer = lexer_create(STR_VIEW("builtins.osl"), STR_VIEW(builtins_data));
+    struct ast* builtins = parse_with_lexer(mem_pool, &lexer, &log);
+    check(mem_pool, type_table, builtins, &log);
+    assert(log.error_count == 0 && log.warn_count == 0);
+    return builtins;
+#else
+    return NULL;
+#endif
+}
+
 int main(int argc, char** argv) {
     struct options options = options_create();
     if (!parse_options(argc, argv, &options)) {
@@ -140,18 +180,17 @@ int main(int argc, char** argv) {
 
     struct mem_pool mem_pool = mem_pool_create();
     struct type_table* type_table = type_table_create(&mem_pool);
-    struct builtins* builtins = builtins_create(type_table);
+    struct ast* builtins = parse_builtins(&mem_pool, type_table);
 
     bool status = true;
     size_t file_count = 0;
     for (int i = 1; i < argc; ++i) {
         if (!argv[i])
             continue;
-        status &= compile_file(argv[i], type_table, builtins, &options);
+        status &= compile_file(argv[i], builtins, type_table, &options);
         file_count++;
     }
 
-    builtins_destroy(builtins);
     type_table_destroy(type_table);
     mem_pool_destroy(&mem_pool);
     options_destroy(&options);

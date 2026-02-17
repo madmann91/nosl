@@ -2,7 +2,6 @@
 #include "env.h"
 #include "ast.h"
 #include "type_table.h"
-#include "builtins.h"
 
 #include <overture/log.h>
 #include <overture/mem_pool.h>
@@ -14,7 +13,7 @@
 #include <stdlib.h>
 
 struct type_checker {
-    const struct builtins* builtins;
+    struct ast_vec constructors[PRIM_TYPE_COUNT];
     struct type_print_options type_print_options;
     struct mem_pool* mem_pool;
     struct type_table* type_table;
@@ -170,7 +169,7 @@ static inline void insert_symbol(
 {
     struct ast* old_ast = env_find_one_symbol(type_checker->env, name);
     if (env_insert_symbol(type_checker->env, name, ast, allow_overload)) {
-        if (!old_ast || allow_overload)
+        if (!old_ast || allow_overload || ast_is_global_var(old_ast))
             return;
         log_warn(type_checker->log, &ast->loc, "symbol '%s' shadows previous definition", name);
     } else {
@@ -413,8 +412,12 @@ static void check_shader_or_func_decl(struct type_checker* type_checker, struct 
         is_shader_decl ? ast->shader_decl.type : ast->func_decl.ret_type);
 
     bool is_constructor = ast_find_attr(ast, "constructor");
-    if (is_constructor && (ret_type->tag != TYPE_PRIM || ret_type->prim_type == PRIM_TYPE_VOID)) {
-        log_error(type_checker->log, &ast->loc, "constructors must return a constructible primitive type");
+    if (is_constructor) {
+        if (ret_type->tag != TYPE_PRIM || ret_type->prim_type == PRIM_TYPE_VOID) {
+            log_error(type_checker->log, &ast->loc, "constructors must return a constructible primitive type");
+        } else {
+            ast_vec_push(&type_checker->constructors[ret_type->prim_type], &ast);
+        }
     }
 
     struct small_func_param_vec func_params;
@@ -919,9 +922,9 @@ static const struct type* check_construct_expr(
 
     struct small_ast_vec candidates;
     small_ast_vec_init(&candidates);
-    struct ast* constructors = builtins_constructors(type_checker->builtins, type->prim_type);
-    for (struct ast* constructor = constructors; constructor; constructor = constructor->next)
-        small_ast_vec_push(&candidates, &constructor);
+    struct ast_vec* constructors = &type_checker->constructors[type->prim_type];
+    for (size_t i = 0; i < constructors->elem_count; ++i)
+        small_ast_vec_push(&candidates, &constructors->elems[i]);
     struct ast* symbol = find_func_from_candidates(type_checker, &ast->loc,
         prim_type_tag_to_string(type->prim_type), candidates.elems, candidates.elem_count, type, ast->construct_expr.args);
     small_ast_vec_destroy(&candidates);
@@ -1030,6 +1033,14 @@ static const struct type* check_cast_expr(
     struct ast* ast,
     const struct type* expected_type)
 {
+    // This can happen for implicit casts inserted during type-checking. If we ever check the same
+    // AST again (e.g. for builtins), then just return the result of the cast.
+    if (!ast->cast_expr.type) {
+        assert(ast->type);
+        assert(!expected_type || ast->type == expected_type);
+        return ast->type;
+    }
+
     ast->type = check_type(type_checker, ast->cast_expr.type);
     const struct type* value_type = check_expr(type_checker, ast->cast_expr.value, NULL);
     if (!type_is_castable_to(value_type, ast->type)) {
@@ -1143,7 +1154,6 @@ static void check_top_level_decl(struct type_checker* type_checker, struct ast* 
 void check(
     struct mem_pool* mem_pool,
     struct type_table* type_table,
-    const struct builtins* builtins,
     struct ast* ast,
     struct log* log)
 {
@@ -1151,12 +1161,12 @@ void check(
         .type_print_options.disable_colors = log->disable_colors,
         .mem_pool = mem_pool,
         .type_table = type_table,
-        .builtins = builtins,
         .env = env_create(),
         .log = log
     };
-    builtins_populate_env(builtins, type_checker.env);
     for (; ast; ast = ast->next)
         check_top_level_decl(&type_checker, ast);
+    for (size_t i = 0; i < PRIM_TYPE_COUNT; ++i)
+        ast_vec_destroy(&type_checker.constructors[i]);
     env_destroy(type_checker.env);
 }

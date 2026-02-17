@@ -16,6 +16,7 @@ struct styles {
 };
 
 SMALL_VEC_IMPL(small_ast_vec, struct ast*, PUBLIC)
+VEC_IMPL(ast_vec, struct ast*, PUBLIC)
 
 static void print(FILE*, size_t, const struct ast*, const struct styles*);
 
@@ -496,11 +497,21 @@ bool ast_is_mutable(const struct ast* ast) {
     }
 }
 
+bool ast_is_global_var(const struct ast* ast) {
+    return ast->tag == AST_VAR && ast->var.is_global;
+}
+
 size_t ast_list_size(const struct ast* ast) {
     size_t size = 0;
     while (ast)
         size++, ast = ast->next;
     return size;
+}
+
+struct ast* ast_list_last(struct ast* ast) {
+    while (ast->next)
+        ast = ast->next;
+    return ast;
 }
 
 size_t ast_field_count(const struct ast* ast) {

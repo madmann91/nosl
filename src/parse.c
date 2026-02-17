@@ -1,5 +1,6 @@
 #include "ast.h"
 #include "parse.h"
+#include "lexer.h"
 #include "preprocessor.h"
 
 #include <overture/log.h>
@@ -13,10 +14,15 @@
 #define TOKENS_AHEAD 3
 #define TOKENS_BEHIND 3
 
+struct parse_input {
+    void* data;
+    struct token (*next_token)(void* data);
+};
+
 struct parser {
     struct token ahead[TOKENS_AHEAD];
     struct token behind[TOKENS_BEHIND];
-    struct preprocessor* preprocessor;
+    struct parse_input input;
     struct mem_pool* mem_pool;
     struct log* log;
 };
@@ -31,7 +37,7 @@ static inline void read_token(struct parser* parser) {
     parser->behind[0] = parser->ahead[0];
     for (size_t i = 1; i < TOKENS_AHEAD; ++i)
         parser->ahead[i - 1] = parser->ahead[i];
-    parser->ahead[TOKENS_AHEAD - 1] = preprocessor_advance(parser->preprocessor);
+    parser->ahead[TOKENS_AHEAD - 1] = parser->input.next_token(parser->input.data);
 }
 
 static inline void eat_token(struct parser* parser, [[maybe_unused]] enum token_tag tag) {
@@ -759,9 +765,11 @@ static struct ast* parse_var_without_init(struct parser* parser) {
     return parse_var(parser, false);
 }
 
-static struct ast* parse_var_decl(struct parser* parser, struct ast* type, bool with_init) {
+static struct ast* parse_var_decl(struct parser* parser, struct ast* type, bool with_init, bool is_global) {
     struct ast* vars = parse_many(parser, TOKEN_SEMICOLON, TOKEN_COMMA,
         with_init ? parse_var_with_init : parse_var_without_init);
+    for (struct ast* var = vars; var; var = var->next)
+        var->var.is_global = is_global;
     return alloc_ast(parser, &type->loc, &(struct ast) {
         .tag = AST_VAR_DECL,
         .var_decl = {
@@ -817,7 +825,7 @@ static struct ast* parse_for_init(struct parser* parser) {
 #define x(name, ...) case TOKEN_##name:
         PRIM_TYPE_LIST(x)
         case TOKEN_CLOSURE:
-            return parse_var_decl(parser, parse_type(parser), true);
+            return parse_var_decl(parser, parse_type(parser), true, false);
         case TOKEN_SEMICOLON:
             return NULL;
         default:
@@ -855,12 +863,12 @@ static struct ast* parse_for_loop(struct parser* parser) {
     });
 }
 
-static struct ast* parse_var_or_func_decl(struct parser* parser) {
+static struct ast* parse_var_or_func_decl(struct parser* parser, bool is_top_level) {
     struct ast* type = parse_type(parser);
     if (parser->ahead[0].tag == TOKEN_IDENT &&
         parser->ahead[1].tag == TOKEN_LPAREN)
         return parse_func_decl(parser, type);
-    return parse_var_decl(parser, type, true);
+    return parse_var_decl(parser, type, true, is_top_level);
 }
 
 static struct ast* parse_empty_stmt(struct parser* parser) {
@@ -875,7 +883,7 @@ static struct ast* parse_stmt(struct parser* parser) {
         PRIM_TYPE_LIST(x)
 #undef x
         case TOKEN_CLOSURE:
-            return parse_var_or_func_decl(parser);
+            return parse_var_or_func_decl(parser, false);
         case TOKEN_IF:
             return parse_if_stmt(parser);
         case TOKEN_BREAK:
@@ -894,7 +902,7 @@ static struct ast* parse_stmt(struct parser* parser) {
             return parse_block(parser);
         case TOKEN_IDENT:
             if (parser->ahead[1].tag == TOKEN_IDENT)
-                return parse_var_or_func_decl(parser);
+                return parse_var_or_func_decl(parser, false);
             [[fallthrough]];
         case TOKEN_INC:
         case TOKEN_DEC:
@@ -938,7 +946,7 @@ static struct ast* parse_shader_decl(struct parser* parser) {
 }
 
 static struct ast* parse_field_decl(struct parser* parser) {
-    return parse_var_decl(parser, parse_type(parser), false);
+    return parse_var_decl(parser, parse_type(parser), false, false);
 }
 
 static struct ast* parse_struct_decl(struct parser* parser) {
@@ -970,7 +978,7 @@ static struct ast* parse_top_level_decl(struct parser* parser) {
 #undef x
         case TOKEN_CLOSURE:
         case TOKEN_IDENT:
-            return parse_var_or_func_decl(parser);
+            return parse_var_or_func_decl(parser, true);
         default:
             return parse_error(parser, "top-level declaration");
     }
@@ -983,17 +991,52 @@ static struct ast* parse_top_level_decl_with_attrs(struct parser* parser) {
     return decl;
 }
 
-struct ast* parse(
+static struct ast* parse(
     struct mem_pool* mem_pool,
-    struct preprocessor* preprocessor,
+    const struct parse_input* input,
     struct log* log)
 {
     struct parser parser = {
         .mem_pool = mem_pool,
-        .preprocessor = preprocessor,
+        .input = *input,
         .log = log
     };
     for (size_t i = 0; i < TOKENS_AHEAD; ++i)
         read_token(&parser);
     return parse_many(&parser, TOKEN_EOF, TOKEN_ERROR, parse_top_level_decl_with_attrs);
+}
+
+static struct token next_token_from_lexer(void* data) {
+    struct lexer* lexer = data;
+    // Skip new lines. Those are needed by the preprocessor, but we do not need them during parsing.
+    while (true) {
+        struct token token = lexer_advance(lexer);
+        if (token.tag != TOKEN_NL)
+            return token;
+    }
+}
+
+struct ast* parse_with_lexer(struct mem_pool* mem_pool, struct lexer* lexer, struct log* log) {
+    struct parse_input input = {
+        .data = lexer,
+        .next_token = next_token_from_lexer
+    };
+    return parse(mem_pool, &input, log);
+}
+
+static struct token next_token_from_preprocessor(void* data) {
+    struct preprocessor* preprocessor = data;
+    return preprocessor_advance(preprocessor);
+}
+
+struct ast* parse_with_preprocessor(
+    struct mem_pool* mem_pool,
+    struct preprocessor* preprocessor,
+    struct log* log)
+{
+    struct parse_input input = {
+        .data = preprocessor,
+        .next_token = next_token_from_preprocessor
+    };
+    return parse(mem_pool, &input, log);
 }
