@@ -109,13 +109,11 @@ static struct ast* parse_many(
 {
     struct ast* first = NULL;
     struct ast** prev = &first;
-    if (parser->ahead->tag != stop) {
-        while (sep != TOKEN_ERROR || parser->ahead->tag != stop) {
-            *prev = parse_func(parser);
-            prev = &(*prev)->next;
-            if (sep != TOKEN_ERROR && !accept_token(parser, sep))
-                break;
-        }
+    while (parser->ahead->tag != stop && parser->ahead->tag != TOKEN_EOF) {
+        *prev = parse_func(parser);
+        prev = &(*prev)->next;
+        if (sep != TOKEN_ERROR && !accept_token(parser, sep))
+            break;
     }
     expect_token(parser, stop);
     return first;

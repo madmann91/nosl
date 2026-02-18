@@ -1,4 +1,0 @@
-void f(int x) {}
-shader foo() {
-    f(1,);
-}

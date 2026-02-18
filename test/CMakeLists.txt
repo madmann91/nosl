@@ -81,7 +81,6 @@ add_nosl_test(LABELS frontend FILE "frontend/pass/components.osl")
 # Tests that need the builtin library to work
 add_nosl_test(LABELS frontend FILE "frontend/pass/loops.osl")
 
-add_nosl_test(LABELS frontend FILE "frontend/fail/trailing_comma.osl"           REGEX "expected '\\)'")
 add_nosl_test(LABELS frontend FILE "frontend/fail/missing_default_value.osl"    REGEX "expected '='")
 add_nosl_test(LABELS frontend FILE "frontend/fail/invalid_break.osl"            REGEX "'break' is not allowed outside of loops")
 add_nosl_test(LABELS frontend FILE "frontend/fail/invalid_continue.osl"         REGEX "'continue' is not allowed outside of loops")

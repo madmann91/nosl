@@ -697,6 +697,12 @@ void fresnel(
     T = refract(I, N, eta);
 }
 
+// Renderer state ---------------------------------------------------------------------------------
+
+__attribute__((builtin)) float surfacearea();
+__attribute__((builtin)) bool backfacing();
+__attribute__((builtin)) bool raytype(string);
+
 // Cleanup ----------------------------------------------------------------------------------------
 
 #undef DET2
