@@ -77,6 +77,7 @@ add_nosl_test(LABELS frontend FILE "frontend/pass/arrays.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/nested_functions.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/index_expression.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/components.osl")
+add_nosl_test(LABELS frontend FILE "frontend/pass/no_eol.osl")
 
 # Tests that need the builtin library to work
 add_nosl_test(LABELS frontend FILE "frontend/pass/loops.osl")

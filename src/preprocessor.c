@@ -207,7 +207,7 @@ static inline struct context* open_source_file_context(struct context* prev, con
     context->source_file.cond_stack.conds = cond_vec_create();
     context->source_file.lexer = lexer_create(
         STR_VIEW(file_name),
-        (struct str_view) { .data = file_data, .length = file_size - 1 });
+        (struct str_view) { .data = file_data, .length = file_size });
     finalize_context(context);
     return context;
 }
