@@ -8,6 +8,10 @@ add_library(libnosl
     env.c
     check.c
     preprocessor.c)
+target_compile_definitions(libnosl PUBLIC
+    -DNOSL_VERSION_MAJOR=${CMAKE_PROJECT_VERSION_MAJOR}
+    -DNOSL_VERSION_MINOR=${CMAKE_PROJECT_VERSION_MINOR}
+    -DNOSL_VERSION_PATCH=${CMAKE_PROJECT_VERSION_PATCH})
 set_target_properties(libnosl PROPERTIES PREFIX "")
 target_link_libraries(libnosl PUBLIC
     overture
