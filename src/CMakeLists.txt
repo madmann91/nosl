@@ -7,8 +7,7 @@ add_library(libnosl
     type_table.c
     env.c
     check.c
-    preprocessor.c
-    builtins_stubs.c)
+    preprocessor.c)
 set_target_properties(libnosl PROPERTIES PREFIX "")
 target_link_libraries(libnosl PUBLIC
     overture
