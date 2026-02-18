@@ -28,12 +28,12 @@ target_link_libraries(noslc_without_builtins PRIVATE libnosl)
 # FIXME: Currently, CMake does not allow setting the search paths for #embed, so we need to generate
 # the file in the current source directory.
 add_custom_command(
-    OUTPUT builtins.osl.preprocessed
+    OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/builtins.osl.preprocessed
     DEPENDS noslc_without_builtins builtins.osl
     COMMAND noslc_without_builtins builtins.osl --print-ast > builtins.osl.preprocessed
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_custom_target(generate_builtins DEPENDS builtins.osl.preprocessed)
+add_custom_target(generate_builtins DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/builtins.osl.preprocessed)
 
 # Build the final version of noslc, with builtins embedded as a string.
 add_executable(noslc main.c)
