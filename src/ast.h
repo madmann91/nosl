@@ -275,6 +275,7 @@ struct ast {
 
 struct ast_print_options {
     bool disable_colors;
+    bool only_first;
     size_t indent;
 };
 

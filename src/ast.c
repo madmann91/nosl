@@ -469,12 +469,15 @@ void ast_print(FILE* file, const struct ast* ast, const struct ast_print_options
     for (const struct ast* decl = ast; decl; decl = decl->next) {
         print(file, options->indent, decl, &styles);
         print_new_line(file, options->indent);
+        if (options->only_first)
+            break;
     }
 }
 
 void ast_dump(const struct ast* ast) {
     ast_print(stdout, ast, &(struct ast_print_options) {
-        .disable_colors = !is_term(stdout)
+        .disable_colors = !is_term(stdout),
+        .only_first = true
     });
     fputs("\n", stdout);
     fflush(stdout);
