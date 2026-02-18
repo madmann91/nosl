@@ -175,8 +175,10 @@ static inline void insert_symbol(
     } else {
         log_error(type_checker->log, &ast->loc, "redefinition for symbol '%s'", name);
     }
-    assert(old_ast);
-    report_previous_location(type_checker, &old_ast->loc);
+    // The previous definition may not be unique, if we are somehow re-defining an already defined
+    // and overloaded symbol as a non-overloadable one (e.g. redefining a function as a variable).
+    if (old_ast)
+        report_previous_location(type_checker, &old_ast->loc);
 }
 
 static inline void insert_cast(

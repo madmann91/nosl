@@ -130,8 +130,8 @@ struct ast* env_find_one_symbol(struct env* env, const char* name) {
     struct scope* scope = env->scope;
     while (scope) {
         struct symbol* symbol = find_first_symbol(scope, name);
-        if (symbol && !symbol->next)
-            return symbol->ast;
+        if (symbol)
+            return symbol->next ? NULL : symbol->ast;
         scope = scope->prev;
     }
     return NULL;

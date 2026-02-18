@@ -1,0 +1,4 @@
+void foo() {}
+float foo() { return 1.; }
+float foo;
+shader baz() {}
