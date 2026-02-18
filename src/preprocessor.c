@@ -466,7 +466,7 @@ static inline struct context* expand_macro_with_args(
     [[maybe_unused]] const struct file_loc* loc)
 {
     assert(macro->param_count == arg_count || (arg_count >= macro->param_count && macro->is_variadic));
-    bool should_concat = false;
+    bool should_concat_left = false;
     struct file_loc concat_loc = {};
 
     struct context* context = alloc_expanded_macro_context(preprocessor->context, macro);
@@ -482,13 +482,13 @@ static inline struct context* expand_macro_with_args(
 
             const struct token_vec* arg_tokens = &args[macro_token.macro_param_index].unexpanded_tokens;
             const bool should_concat_right = i + 1 < macro->tokens.elem_count && macro->tokens.elems[i + 1].tag == TOKEN_CONCAT;
-            if (!should_concat && !should_concat_right)
+            if (!should_concat_left && !should_concat_right)
                 arg_tokens = expand_macro_arg(preprocessor, &args[macro_token.macro_param_index]);
 
             expanded_tokens     = arg_tokens->elems;
             num_expanded_tokens = arg_tokens->elem_count;
         } else if (macro_token.tag == TOKEN_CONCAT) {
-            should_concat = true;
+            should_concat_left = true;
             concat_loc = macro_token.loc;
             continue;
         } else if (macro_token.tag == TOKEN_HASH) {
@@ -497,7 +497,7 @@ static inline struct context* expand_macro_with_args(
             macro_token = stringify_macro_arg(preprocessor, &args[macro->tokens.elems[++i].macro_param_index]);
         }
 
-        if (should_concat) {
+        if (should_concat_left) {
             // There may not be a right-hand side or left-hand side to the concatenation operator,
             // if argument expansion produced no token on either side.
             if (num_expanded_tokens > 0 && !token_vec_is_empty(&context->token_buffer.tokens)) {
@@ -506,7 +506,7 @@ static inline struct context* expand_macro_with_args(
                 expanded_tokens++;
                 num_expanded_tokens--;
             }
-            should_concat = false;
+            should_concat_left = false;
         }
 
         for (size_t i = 0; i < num_expanded_tokens; ++i)
