@@ -29,6 +29,7 @@ struct parser {
 
 static struct ast* parse_type(struct parser*);
 static struct ast* parse_expr(struct parser*);
+static struct ast* parse_primary_expr(struct parser*);
 static struct ast* parse_stmt(struct parser*);
 
 static inline void read_token(struct parser* parser) {
@@ -216,7 +217,7 @@ static struct ast* parse_cast_expr(struct parser* parser) {
     eat_token(parser, TOKEN_LPAREN);
     struct ast* type = parse_type(parser);
     expect_token(parser, TOKEN_RPAREN);
-    struct ast* value = parse_expr(parser);
+    struct ast* value = parse_primary_expr(parser);
     return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_CAST_EXPR,
         .cast_expr = {
