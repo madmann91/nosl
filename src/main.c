@@ -21,6 +21,7 @@ VEC_DEFINE(raw_str_vec, char*, PRIVATE)
 struct options {
     bool print_ast;
     bool disable_colors;
+    bool disable_builtins;
     bool warns_as_errors;
     struct raw_str_vec include_dirs;
     uint32_t max_warns;
@@ -31,6 +32,7 @@ static struct options options_create() {
     return (struct options) {
         .print_ast = false,
         .disable_colors = false,
+        .disable_builtins = false,
         .max_errors = UINT32_MAX,
         .max_warns = UINT32_MAX,
         .include_dirs = raw_str_vec_create()
@@ -51,6 +53,7 @@ static enum cli_state usage(void*, char*) {
         "      --warns-as-errors           Turns warnings into errors.\n"
         "      --max-errors <n>            Sets the maximum number of error messages to display.\n"
         "      --max-warns <n>             Sets the maximum number of warning messages to display.\n"
+        "      --no-builtins               Do not automatically include built-in functions and operators.\n"
         "      --print-ast                 Prints the AST on the standard output.\n"
         "  -I  --include-dir <directory>   Adds the given directory to the list of include directories.\n");
     return CLI_STATE_ERROR;
@@ -130,6 +133,7 @@ static bool parse_options(int argc, char** argv, struct options* options) {
     struct cli_option cli_options[] = {
         { .short_name = "-h", .long_name = "--help", .parse = usage },
         cli_flag(NULL, "--no-color",        &options->disable_colors),
+        cli_flag(NULL, "--no-builtins",     &options->disable_builtins),
         cli_flag(NULL, "--warns-as-errors", &options->warns_as_errors),
         cli_flag(NULL, "--print-ast",       &options->print_ast),
         cli_option_uint32(NULL, "--max-errors", &options->max_errors),
@@ -180,7 +184,10 @@ int main(int argc, char** argv) {
 
     struct mem_pool mem_pool = mem_pool_create();
     struct type_table* type_table = type_table_create(&mem_pool);
-    struct ast* builtins = parse_builtins(&mem_pool, type_table);
+
+    struct ast* builtins = NULL;
+    if (!options.disable_builtins)
+        builtins = parse_builtins(&mem_pool, type_table);
 
     bool status = true;
     size_t file_count = 0;
