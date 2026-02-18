@@ -581,11 +581,18 @@ static inline struct file_loc eat_extra_tokens(struct preprocessor* preprocessor
     return loc;
 }
 
-static inline void preprocessor_error(struct preprocessor* preprocessor, const char* msg) {
-    struct token token = read_token(preprocessor);
-    log_error(preprocessor->log, &token.loc,
-        "expected %s, but got '%.*s'",
-        msg, (int)token.contents.length, token.contents.data);
+static void expand_file_macro(struct preprocessor*) {
+}
+
+static void expand_line_macro(struct preprocessor*) {
+}
+
+static void register_custom_macro(struct preprocessor*, const char* name, void (*expand_macro)(struct preprocessor*)) {
+}
+
+static void register_standard_macros(struct preprocessor* preprocessor) {
+    register_custom_macro(preprocessor, "__FILE__", expand_file_macro);
+    register_custom_macro(preprocessor, "__LINE__", expand_line_macro);
 }
 
 struct preprocessor* preprocessor_open(
@@ -604,6 +611,8 @@ struct preprocessor* preprocessor_open(
     preprocessor->macros = macro_set_create();
     preprocessor->mem_pool = mem_pool_create();
     preprocessor->str_pool = str_pool_create(&preprocessor->mem_pool);
+
+    register_standard_macros(preprocessor);
 
     push_context(preprocessor, context);
     return preprocessor;
@@ -627,11 +636,18 @@ static inline int parse_literal(struct preprocessor* preprocessor) {
     return int_literal;
 }
 
+static inline void report_error(struct preprocessor* preprocessor, const char* msg) {
+    struct token token = read_token(preprocessor);
+    log_error(preprocessor->log, &token.loc,
+        "expected %s, but got '%.*s'",
+        msg, (int)token.contents.length, token.contents.data);
+}
+
 static inline int parse_condition(struct preprocessor* preprocessor) {
     switch (peek_token(preprocessor).tag) {
         case TOKEN_INT_LITERAL: return parse_literal(preprocessor);
         default:
-            preprocessor_error(preprocessor, "condition");
+            report_error(preprocessor, "condition");
             return 0;
     }
 }
@@ -1132,4 +1148,29 @@ struct token preprocessor_advance(struct preprocessor* preprocessor) {
 
         return token;
     }
+}
+
+void preprocessor_register_macro(struct preprocessor* preprocessor, const char* name, const char* expansion) {
+    // Internalize strings so that their lifetime is tied to the preprocessor.
+    name = str_pool_insert(preprocessor->str_pool, name);
+    expansion = str_pool_insert(preprocessor->str_pool, expansion);
+
+    struct macro macro = {
+        .tokens = token_vec_create(),
+        .name = name,
+        .has_params = false,
+        .is_variadic = false,
+        .param_count = 0,
+        .loc = { .file_name = STR_VIEW("<builtin macro>") }
+    };
+
+    struct lexer lexer = lexer_create(STR_VIEW(name), STR_VIEW(expansion));
+    while (true) {
+        struct token token = lexer_advance(&lexer);
+        if (token.tag == TOKEN_EOF)
+            break;
+        token_vec_push(&macro.tokens, &token);
+    }
+
+    insert_macro(preprocessor, &macro);
 }

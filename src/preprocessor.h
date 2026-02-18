@@ -12,3 +12,5 @@ struct preprocessor;
 
 void preprocessor_close(struct preprocessor*);
 struct token preprocessor_advance(struct preprocessor*);
+
+void preprocessor_register_macro(struct preprocessor*, const char* name, const char* expansion);

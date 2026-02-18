@@ -11,11 +11,18 @@
 #include <overture/log.h>
 #include <overture/term.h>
 #include <overture/vec.h>
+#include <overture/str.h>
 
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
 
+struct user_macro {
+    const char* name;
+    const char* expansion;
+};
+
+VEC_DEFINE(user_macro_vec, struct user_macro, PRIVATE)
 VEC_DEFINE(raw_str_vec, char*, PRIVATE)
 
 struct options {
@@ -24,6 +31,7 @@ struct options {
     bool disable_builtins;
     bool warns_as_errors;
     struct raw_str_vec include_dirs;
+    struct user_macro_vec user_macros;
     uint32_t max_warns;
     uint32_t max_errors;
 };
@@ -35,7 +43,8 @@ static struct options options_create() {
         .disable_builtins = false,
         .max_errors = UINT32_MAX,
         .max_warns = UINT32_MAX,
-        .include_dirs = raw_str_vec_create()
+        .include_dirs = raw_str_vec_create(),
+        .user_macros = user_macro_vec_create()
     };
 }
 
@@ -78,6 +87,44 @@ static struct cli_option cli_option_multi_strings(
     };
 }
 
+static void register_standard_macros(struct preprocessor* preprocessor) {
+    preprocessor_register_macro(preprocessor, "M_PI",       "3.1415926535897932");
+    preprocessor_register_macro(preprocessor, "M_PI_2",     "1.5707963267948966");
+    preprocessor_register_macro(preprocessor, "M_PI_4",     "0.7853981633974483");
+    preprocessor_register_macro(preprocessor, "M_2_PI",     "0.6366197723675813");
+    preprocessor_register_macro(preprocessor, "M_2PI",      "6.2831853071795865");
+    preprocessor_register_macro(preprocessor, "M_4PI",      "12.566370614359173");
+    preprocessor_register_macro(preprocessor, "M_2_SQRTPI", "1.1283791670955126");
+    preprocessor_register_macro(preprocessor, "M_E",        "2.7182818284590452");
+    preprocessor_register_macro(preprocessor, "M_LN2",      "0.6931471805599453");
+    preprocessor_register_macro(preprocessor, "M_LN10",     "2.3025850929940457");
+    preprocessor_register_macro(preprocessor, "M_LOG2E",    "1.4426950408889634");
+    preprocessor_register_macro(preprocessor, "M_LOG10E",   "0.4342944819032518");
+    preprocessor_register_macro(preprocessor, "M_SQRT2",    "1.4142135623730950");
+    preprocessor_register_macro(preprocessor, "M_SQRT1_2",  "0.7071067811865475");
+
+#define STR(x) #x
+#define STRINGIFY(x) STR(x)
+
+    preprocessor_register_macro(preprocessor, "NOSL_VERSION_MAJOR", STRINGIFY(NOSL_VERSION_MINOR));
+    preprocessor_register_macro(preprocessor, "NOSL_VERSION_MINOR", STRINGIFY(NOSL_VERSION_MINOR));
+    preprocessor_register_macro(preprocessor, "NOSL_VERSION_PATCH", STRINGIFY(NOSL_VERSION_PATCH));
+
+#undef STRINGIFY
+#undef STR
+
+    struct str full_version = str_create();
+    str_printf(&full_version, "%d", 10000 * NOSL_VERSION_MAJOR + 100 * NOSL_VERSION_MINOR + NOSL_VERSION_PATCH);
+    preprocessor_register_macro(preprocessor, "NOSL_VERSION", str_terminate(&full_version));
+    str_destroy(&full_version);
+}
+
+static void register_user_macros(struct preprocessor* preprocessor, const struct options* options) {
+    VEC_FOREACH(struct user_macro, user_macro, options->user_macros) {
+        preprocessor_register_macro(preprocessor, user_macro->name, user_macro->expansion);
+    }
+}
+
 static bool compile_file(
     const char* file_name,
     struct ast* builtins,
@@ -97,6 +144,9 @@ static bool compile_file(
         log_error(&log, NULL, "cannot open '%s'\n", file_name);
         return false;
     }
+
+    register_standard_macros(preprocessor);
+    register_user_macros(preprocessor, options);
 
     struct mem_pool mem_pool = mem_pool_create();
     struct ast* program = parse_with_preprocessor(&mem_pool, preprocessor, &log);
