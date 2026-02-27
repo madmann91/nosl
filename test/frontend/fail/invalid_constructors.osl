@@ -1,0 +1,6 @@
+void func() {}
+shader test() {
+    string s = string(0);
+    matrix m = matrix("abcd");
+    vector v = vector(func());
+}

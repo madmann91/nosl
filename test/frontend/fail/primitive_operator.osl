@@ -1,0 +1,2 @@
+float __operator__add__(float x, float y) { return 42; }
+shader foo() {}

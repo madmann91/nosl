@@ -75,25 +75,56 @@ const char* binary_expr_tag_to_func_name(enum binary_expr_tag tag) {
         case BINARY_EXPR_BIT_AND: return "__operator__bitand__";
         case BINARY_EXPR_BIT_XOR: return "__operator__xor__";
         case BINARY_EXPR_BIT_OR:  return "__operator__bitor__";
-        default:
-            assert(false && "non-overloadable binary operator");
-            return "";
+        default:                  return NULL;
     }
 }
 
 const char* unary_expr_tag_to_func_name(enum unary_expr_tag tag) {
     switch (tag) {
-        case UNARY_EXPR_PRE_INC:  return "__operator__pre_inc__";
-        case UNARY_EXPR_PRE_DEC:  return "__operator__pre_dec__";
-        case UNARY_EXPR_POST_INC: return "__operator__post_inc__";
-        case UNARY_EXPR_POST_DEC: return "__operator__post_dec__";
+        case UNARY_EXPR_PRE_INC:
+        case UNARY_EXPR_POST_INC:
+            return "__operator__add__";
+
+        case UNARY_EXPR_PRE_DEC:
+        case UNARY_EXPR_POST_DEC:
+            return "__operator__sub__";
+
         case UNARY_EXPR_NEG:      return "__operator__neg__";
         case UNARY_EXPR_BIT_NOT:  return "__operator__compl__";
         case UNARY_EXPR_NOT:      return "__operator__not__";
-        default:
-            assert(false && "invalid unary expression");
-            return "";
+        default:                  return NULL;
     }
+}
+
+bool func_name_is_unary_operator(const char* func_name) {
+    // This deliberately excludes increment and decrement operators, which desugar into binary
+    // operators `+` and `-`.
+#define x(tag, ...) \
+    if (!unary_expr_tag_is_inc_or_dec(UNARY_EXPR_##tag)) { \
+        const char* operator_name = unary_expr_tag_to_func_name(UNARY_EXPR_##tag); \
+        if (operator_name && !strcmp(operator_name, func_name)) \
+            return true; \
+    }
+    UNARY_EXPR_LIST(x)
+#undef x
+    return false;
+}
+
+bool func_name_is_binary_operator(const char* func_name) {
+#define x(tag, ...) \
+    { \
+        const char* operator_name = binary_expr_tag_to_func_name(BINARY_EXPR_##tag); \
+        if (operator_name && !strcmp(operator_name, func_name)) \
+            return true; \
+    }
+    BINARY_EXPR_LIST(x)
+#undef x
+    return false;
+}
+
+bool func_name_is_operator(const char* func_name) {
+    static const char* operator_prefix = "__operator__";
+    return !strncmp(func_name, operator_prefix, strlen(operator_prefix));
 }
 
 enum binary_expr_tag binary_expr_tag_remove_assign(enum binary_expr_tag tag) {
@@ -243,12 +274,14 @@ static void print(
             print(file, indent, ast->metadatum.init, styles);
             break;
         case AST_PRIM_TYPE:
-            if (ast->prim_type.is_closure)
-                fprintf(file, "%sclosure%s ", styles->keyword, styles->reset);
-            fprintf(file, "%s%s%s", styles->keyword, prim_type_tag_to_string(ast->prim_type.tag), styles->reset);
+            fprintf(file, "%s%s%s", styles->keyword, prim_type_to_string(ast->prim_type), styles->reset);
+            break;
+        case AST_CLOSURE_TYPE:
+            fprintf(file, "%sclosure%s ", styles->keyword, styles->reset);
+            print(file, indent, ast->closure_type.inner_type, styles);
             break;
         case AST_SHADER_TYPE:
-            fprintf(file, "%s%s%s", styles->keyword, shader_type_tag_to_string(ast->shader_type.tag), styles->reset);
+            fprintf(file, "%s%s%s", styles->keyword, shader_type_to_string(ast->shader_type), styles->reset);
             break;
         case AST_NAMED_TYPE:
             fprintf(file, "%s", ast->named_type.name);
@@ -474,6 +507,7 @@ void ast_print(FILE* file, const struct ast* ast, const struct ast_print_options
     }
 }
 
+// GCOV_EXCL_START
 void ast_dump(const struct ast* ast) {
     ast_print(stdout, ast, &(struct ast_print_options) {
         .disable_colors = !is_term(stdout),
@@ -482,6 +516,7 @@ void ast_dump(const struct ast* ast) {
     fputs("\n", stdout);
     fflush(stdout);
 }
+// GCOV_EXCL_STOP
 
 bool ast_is_mutable(const struct ast* ast) {
     switch (ast->tag) {

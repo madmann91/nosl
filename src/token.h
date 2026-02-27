@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#define PRIM_TYPE_LIST(x) \
+#define PRIM_TYPE_LIST_WITHOUT_VOID(x) \
     x(BOOL,   "bool",   BOOL,   1) \
     x(FLOAT,  "float",  FLOAT,  1) \
     x(INT,    "int",    INT,    1) \
@@ -17,7 +17,10 @@
     x(VECTOR, "vector", FLOAT,  3) \
     x(NORMAL, "normal", FLOAT,  3) \
     x(MATRIX, "matrix", FLOAT, 16) \
-    x(STRING, "string", STRING, 1) \
+    x(STRING, "string", STRING, 1)
+
+#define PRIM_TYPE_LIST(x) \
+    PRIM_TYPE_LIST_WITHOUT_VOID(x) \
     x(VOID,   "void",   VOID,   0)
 
 #define SHADER_TYPE_LIST(x) \

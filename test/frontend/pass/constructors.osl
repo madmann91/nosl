@@ -1,0 +1,41 @@
+shader test() {
+    bool b1 = bool(0);
+    bool b2 = bool(0.);
+    bool b3 = bool(true);
+
+    int i1 = int(0);
+    int i2 = int(0.);
+    int i3 = int(true);
+
+    float f1 = float(0);
+    float f2 = float(0.);
+    float f3 = float(true);
+
+    vector v0 = vector(0);
+    vector v1 = vector(0, 0, 0);
+    vector v2 = vector("common", 0);
+    vector v3 = vector("common", 0, 0, 0);
+
+    point p0 = point(0);
+    point p1 = point(0, 0, 0);
+    point p2 = point("common", 0);
+    point p3 = point("common", 0, 0, 0);
+
+    normal n0 = normal(0);
+    normal n1 = normal(0, 0, 0);
+    normal n2 = normal("common", 0);
+    normal n3 = normal("common", 0, 0, 0);
+
+    color c0 = color(0);
+    color c1 = color(0, 0, 0);
+    color c2 = color("rgb", 0);
+    color c3 = color("rgb", 0, 0, 0);
+
+    matrix m0 = matrix(0);
+    matrix m1 = matrix("common", 0);
+    matrix m2 = matrix("common", "object");
+    matrix m3 = matrix(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    matrix m4 = matrix("common", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
+    string s = string("hello");
+}

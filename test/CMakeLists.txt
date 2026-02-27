@@ -74,12 +74,14 @@ add_nosl_test(LABELS frontend FILE "frontend/pass/explicit_casts.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/implicit_casts.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/struct_fields.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/arrays.osl")
+add_nosl_test(LABELS frontend FILE "frontend/pass/color_array.osl")
+add_nosl_test(LABELS frontend FILE "frontend/pass/constructors.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/nested_functions.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/index_expression.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/components.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/no_eol.osl")
-
-# Tests that need the builtin library to work
+add_nosl_test(LABELS frontend FILE "frontend/pass/builtin_operators.osl")
+add_nosl_test(LABELS frontend FILE "frontend/pass/overloaded_operators.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/loops.osl")
 
 add_nosl_test(LABELS frontend FILE "frontend/fail/missing_default_value.osl"    REGEX "expected '='")
@@ -104,8 +106,33 @@ add_nosl_test(LABELS frontend FILE "frontend/fail/overloaded_identifier.osl"    
 add_nosl_test(LABELS frontend FILE "frontend/fail/overload_variable.osl"        REGEX "redefinition for symbol 'foo'")
 add_nosl_test(LABELS frontend FILE "frontend/fail/function_as_value.osl"        REGEX "cannot use function 'foo' as value")
 add_nosl_test(LABELS frontend FILE "frontend/fail/struct_as_value.osl"          REGEX "cannot use structure 'S' as value")
-add_nosl_test(LABELS frontend FILE "frontend/fail/operator_struct.osl"          REGEX "structure name '__operator__add__' is not allowed")
+add_nosl_test(LABELS frontend FILE "frontend/fail/operator_struct.osl"          REGEX "identifier '__operator__add__' is reserved for operators")
+add_nosl_test(LABELS frontend FILE "frontend/fail/primitive_operator.osl"       REGEX "operators must have at least one parameter with non-primitive type")
+add_nosl_test(LABELS frontend FILE "frontend/fail/bad_unary_operator.osl"       REGEX "unary operators should only have one parameter")
+add_nosl_test(LABELS frontend FILE "frontend/fail/bad_binary_operator.osl"      REGEX "binary operators should have exactly two parameters")
+add_nosl_test(LABELS frontend FILE "frontend/fail/unknown_function.osl"         REGEX "unknown identifier 'unknown_function_with_complex_name'")
+add_nosl_test(LABELS frontend FILE "frontend/fail/unknown_field.osl"            REGEX "unknown field or component 'c' for type 'S'")
+add_nosl_test(LABELS frontend FILE "frontend/fail/invalid_call.osl"             REGEX "expected function type, but got type 'int'")
+add_nosl_test(LABELS frontend FILE "frontend/fail/invalid_builtin.osl"          REGEX "built-in function cannot have a body")
+add_nosl_test(LABELS frontend FILE "frontend/fail/invalid_shader.osl"           REGEX "shaders cannot return a value")
+
+add_nosl_test(LABELS frontend FILE "frontend/fail/invalid_constructors.osl"
+    REGEX "\
+invalid constructor call with signature 'string \\(int\\)'.*\
+invalid constructor call with signature 'matrix \\(string\\)'.*\
+invalid constructor call with signature 'vector \\(void\\)'")
+
 add_nosl_test(LABELS frontend FILE "frontend/fail/non_indexable_expression.osl" REGEX "expected vector, point, normal, color, or array type, but got type 'int'")
+
+add_nosl_test(LABELS frontend FILE "frontend/fail/invalid_ellipsis.osl"
+    REGEX "\
+'...' is only valid at the end of a parameter list.*\
+'...' is only allowed on built-in functions")
+
+add_nosl_test(LABELS frontend FILE "frontend/fail/increment_string.osl"
+    REGEX "\
+invalid type 'string' for operator '\\+\\+'.*\
+invalid types 'string' and 'int' for operator '\\+='")
 
 add_nosl_test(LABELS frontend FILE "frontend/fail/unknown_identifiers.osl"
     REGEX "\

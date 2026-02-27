@@ -1,0 +1,3 @@
+struct S { int empty; };
+S __operator__add__(S x) { return S(0); }
+shader foo() {}

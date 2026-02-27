@@ -7,13 +7,13 @@
 #include <overture/mem_pool.h>
 #include <overture/mem_stream.h>
 #include <overture/vec.h>
+#include <overture/span.h>
 
 #include <assert.h>
 #include <string.h>
 #include <stdlib.h>
 
 struct type_checker {
-    struct ast_vec constructors[PRIM_TYPE_COUNT];
     struct type_print_options type_print_options;
     struct mem_pool* mem_pool;
     struct type_table* type_table;
@@ -161,6 +161,16 @@ static inline void report_incomplete_coercion(
     report_missing_field(type_checker, loc, expected_type, type->compound_type.elem_count, false);
 }
 
+static inline void report_invalid_operator(
+    struct type_checker* type_checker,
+    struct file_loc* loc,
+    const char* name,
+    const char* msg)
+{
+    log_error(type_checker->log, loc, "invalid %s name '%s'", msg, name);
+    log_note(type_checker->log, NULL, "identifier '%s' is reserved for operators", name);
+}
+
 static inline void insert_symbol(
     struct type_checker* type_checker,
     const char* name,
@@ -245,14 +255,16 @@ static inline void expect_mutable(struct type_checker* type_checker, struct ast*
 }
 
 static const struct type* check_prim_type(struct type_checker* type_checker, struct ast* ast) {
-    const struct type* prim_type = type_table_make_prim_type(type_checker->type_table, ast->prim_type.tag);
-    if (!ast->prim_type.is_closure)
-        return prim_type;
-    return type_table_make_closure_type(type_checker->type_table, prim_type);
+    return type_table_make_prim_type(type_checker->type_table, ast->prim_type);
+}
+
+static const struct type* check_closure_type(struct type_checker* type_checker, struct ast* ast) {
+    const struct type* inner_type = check_type(type_checker, ast->closure_type.inner_type);
+    return type_table_make_closure_type(type_checker->type_table, inner_type);
 }
 
 static const struct type* check_shader_type(struct type_checker* type_checker, struct ast* ast) {
-    return type_table_make_shader_type(type_checker->type_table, ast->shader_type.tag);
+    return type_table_make_shader_type(type_checker->type_table, ast->shader_type);
 }
 
 static const struct type* check_named_type(struct type_checker* type_checker, struct ast* ast) {
@@ -268,9 +280,10 @@ static const struct type* check_named_type(struct type_checker* type_checker, st
 
 static const struct type* check_type(struct type_checker* type_checker, struct ast* ast) {
     switch (ast->tag) {
-        case AST_PRIM_TYPE:   return check_prim_type(type_checker, ast);
-        case AST_SHADER_TYPE: return check_shader_type(type_checker, ast);
-        case AST_NAMED_TYPE:  return check_named_type(type_checker, ast);
+        case AST_PRIM_TYPE:    return check_prim_type(type_checker, ast);
+        case AST_CLOSURE_TYPE: return check_closure_type(type_checker, ast);
+        case AST_SHADER_TYPE:  return check_shader_type(type_checker, ast);
+        case AST_NAMED_TYPE:   return check_named_type(type_checker, ast);
         default:
             assert(false && "invalid type");
             [[fallthrough]];
@@ -402,25 +415,49 @@ static inline void insert_func_or_shader_symbol(struct type_checker* type_checke
     }
 }
 
+static inline bool are_all_prim_or_closure_type(struct ast* arg) {
+    for (; arg; arg = arg->next) {
+        if (arg->type->tag != TYPE_PRIM && arg->type->tag != TYPE_CLOSURE)
+            return false;
+    }
+    return true;
+}
+
+static bool check_operator_signature(struct type_checker* type_checker, struct ast* ast) {
+    struct ast* params = ast->tag == AST_SHADER_DECL ? ast->shader_decl.params : ast->func_decl.params;
+
+    const char* func_name = ast_decl_name(ast);
+    if (ast->tag == AST_SHADER_DECL) {
+        report_invalid_operator(type_checker, &ast->loc, func_name, "shader");
+        return false;
+    } else if (are_all_prim_or_closure_type(params)) {
+        log_error(type_checker->log, &ast->loc, "operators must have at least one parameter with non-primitive type");
+        return false;
+    } else {
+        size_t param_count = ast_list_size(params);
+        if (param_count != 1 && func_name_is_unary_operator(func_name)) {
+            log_error(type_checker->log, &ast->loc, "unary operators should only have one parameter");
+            return false;
+        } else if (param_count != 2 && func_name_is_binary_operator(func_name)) {
+            log_error(type_checker->log, &ast->loc, "binary operators should have exactly two parameters");
+            return false;
+        }
+    }
+    return true;
+}
+
 static void check_shader_or_func_decl(struct type_checker* type_checker, struct ast* ast) {
     assert(ast->tag == AST_FUNC_DECL || ast->tag == AST_SHADER_DECL);
     env_push_scope(type_checker->env, ast);
 
-    bool is_shader_decl = ast->tag == AST_SHADER_DECL;
-    struct ast* params = is_shader_decl ? ast->shader_decl.params : ast->func_decl.params;
+    struct ast* params = ast->tag == AST_SHADER_DECL ? ast->shader_decl.params : ast->func_decl.params;
     bool has_ellipsis = check_params(type_checker, params);
 
-    const struct type* ret_type = check_type(type_checker,
-        is_shader_decl ? ast->shader_decl.type : ast->func_decl.ret_type);
+    if (func_name_is_operator(ast_decl_name(ast)) && !check_operator_signature(type_checker, ast))
+        return;
 
-    bool is_constructor = ast_find_attr(ast, "constructor");
-    if (is_constructor) {
-        if (ret_type->tag != TYPE_PRIM || ret_type->prim_type == PRIM_TYPE_VOID) {
-            log_error(type_checker->log, &ast->loc, "constructors must return a constructible primitive type");
-        } else {
-            ast_vec_push(&type_checker->constructors[ret_type->prim_type], &ast);
-        }
-    }
+    const struct type* ret_type = check_type(type_checker,
+        ast->tag == AST_SHADER_DECL ? ast->shader_decl.type : ast->func_decl.ret_type);
 
     struct small_func_param_vec func_params;
     small_func_param_vec_init(&func_params);
@@ -451,10 +488,7 @@ static void check_shader_or_func_decl(struct type_checker* type_checker, struct 
 
     env_pop_scope(type_checker->env);
 
-    // Constructors are not placed into the environment, as they are not invoked like "real"
-    // functions, but through a constructor expression instead.
-    if (!is_constructor)
-        insert_func_or_shader_symbol(type_checker, ast);
+    insert_func_or_shader_symbol(type_checker, ast);
 }
 
 static void check_return_stmt(struct type_checker* type_checker, struct ast* ast) {
@@ -838,6 +872,83 @@ static inline const struct type* find_func_ret_type(struct ast* symbol) {
     return symbol->type->func_type.ret_type;
 }
 
+static const struct type* join_types(struct type_checker* type_checker, struct ast* left, struct ast* right) {
+    if (type_coercion_rank(right->type, left->type) != COERCION_IMPOSSIBLE)
+        return coerce_expr(type_checker, right, left->type);
+    return coerce_expr(type_checker, left, right->type);
+}
+
+static const struct type* check_builtin_binary_expr(struct type_checker* type_checker, struct ast* ast) {
+    struct ast* left_arg = ast->binary_expr.args;
+    struct ast* right_arg = left_arg->next;
+
+    const struct type* left_type = left_arg->type;
+    const struct type* right_type = right_arg->type;
+    enum binary_expr_tag no_assign_tag = binary_expr_tag_remove_assign(ast->binary_expr.tag);
+    switch (no_assign_tag) {
+        case BINARY_EXPR_DIV:
+        case BINARY_EXPR_MUL:
+        case BINARY_EXPR_ADD:
+        case BINARY_EXPR_SUB:
+            if ((type_is_scalar(left_type) && type_is_scalar(right_type)) ||
+                (type_is_triple(left_type) && type_is_triple(right_type)) ||
+                (type_is_matrix(left_type) && type_is_matrix(right_type)) ||
+                (type_is_scalar(left_type) && (type_is_matrix(right_type) || type_is_triple(right_type))) ||
+                (type_is_scalar(right_type) && (type_is_matrix(left_type) || type_is_triple(left_type))))
+                return join_types(type_checker, left_arg, right_arg);
+            if (type_is_closure_color(left_type) || type_is_closure_color(right_type)) {
+                // For color closures, allow multiplication by a scalar or triple, and adding or
+                // subtracting two color closures together.
+                if (no_assign_tag == BINARY_EXPR_MUL) {
+                    if (type_is_scalar(left_type) || type_is_triple(left_type)) {
+                        coerce_expr(type_checker, left_arg, type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_COLOR));
+                        return right_type;
+                    } else if (type_is_scalar(right_type) || type_is_triple(right_type)) {
+                        coerce_expr(type_checker, right_arg, type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_COLOR));
+                        return left_type;
+                    }
+                } else if (no_assign_tag == BINARY_EXPR_ADD || no_assign_tag == BINARY_EXPR_SUB) {
+                    if (type_is_closure_color(left_type) && type_is_closure_color(right_type))
+                        return left_type;
+                }
+            }
+            break;
+        case BINARY_EXPR_BIT_AND:
+        case BINARY_EXPR_BIT_XOR:
+        case BINARY_EXPR_BIT_OR:
+            if ((type_is_bool(left_type) || type_is_int(left_type)) &&
+                (type_is_bool(right_type) || type_is_int(right_type)))
+                return join_types(type_checker, left_arg, right_arg);
+            break;
+        case BINARY_EXPR_REM:
+        case BINARY_EXPR_LSHIFT:
+        case BINARY_EXPR_RSHIFT:
+            if (type_is_int(left_type) && type_is_int(right_type))
+                return left_type;
+            break;
+        case BINARY_EXPR_CMP_LT:
+        case BINARY_EXPR_CMP_LE:
+        case BINARY_EXPR_CMP_GT:
+        case BINARY_EXPR_CMP_GE:
+        case BINARY_EXPR_CMP_NE:
+        case BINARY_EXPR_CMP_EQ:
+            join_types(type_checker, left_arg, right_arg);
+            return type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_BOOL);
+        default:
+            assert(false && "unknown builtin binary operator");
+            break;
+    }
+
+    char* left_type_string  = type_to_string(left_type,  &type_checker->type_print_options);
+    char* right_type_string = type_to_string(right_type, &type_checker->type_print_options);
+    log_error(type_checker->log, &ast->loc,
+        "invalid types '%s' and '%s' for operator '%s'",
+        left_type_string, right_type_string, binary_expr_tag_to_string(ast->binary_expr.tag));
+    free(left_type_string);
+    free(right_type_string);
+    return type_table_make_error_type(type_checker->type_table);
+}
+
 static const struct type* check_binary_expr(
     struct type_checker* type_checker,
     struct ast* ast,
@@ -851,17 +962,64 @@ static const struct type* check_binary_expr(
     if (!check_call_args(type_checker, ast->binary_expr.args))
         return ast->type = type_table_make_error_type(type_checker->type_table);
 
-    const char* func_name = binary_expr_tag_to_func_name(ast->binary_expr.tag);
-    struct ast* symbol = find_func_or_struct_with_name(type_checker, &ast->loc, func_name, expected_type, ast->binary_expr.args);
-    if (!symbol)
-        return ast->type = type_table_make_error_type(type_checker->type_table);
+    bool is_assign = binary_expr_tag_is_assign(ast->binary_expr.tag);
+    if (are_all_prim_or_closure_type(ast->binary_expr.args)) {
+        ast->type = check_builtin_binary_expr(type_checker, ast);
+    } else {
+        const char* func_name = binary_expr_tag_to_func_name(ast->binary_expr.tag);
+        const struct type* ret_type = is_assign ? ast->binary_expr.args->type : expected_type;
+        struct ast* symbol = find_func_or_struct_with_name(type_checker, &ast->loc, func_name, ret_type, ast->binary_expr.args);
+        if (!symbol)
+            return ast->type = type_table_make_error_type(type_checker->type_table);
 
-    ast->unary_expr.symbol = symbol;
-    ast->type = find_func_ret_type(symbol);
+        assert(symbol->tag == AST_FUNC_DECL);
+        ast->binary_expr.symbol = symbol;
+        ast->type = find_func_ret_type(symbol);
+    }
 
-    if (binary_expr_tag_is_assign(ast->binary_expr.tag))
+    if (is_assign)
         expect_mutable(type_checker, ast->binary_expr.args);
     return coerce_expr(type_checker, ast, expected_type);
+}
+
+static const struct type* check_builtin_unary_expr(
+    struct type_checker* type_checker,
+    struct ast* ast)
+{
+    if (unary_expr_tag_is_inc_or_dec(ast->unary_expr.tag))
+        expect_mutable(type_checker, ast->unary_expr.arg);
+
+    const struct type* arg_type = ast->unary_expr.arg->type;
+    switch (ast->unary_expr.tag) {
+        case UNARY_EXPR_NEG:
+            if (type_is_triple(arg_type) || type_is_matrix(arg_type) || type_is_closure_color(arg_type))
+                return arg_type;
+            [[fallthrough]];
+        case UNARY_EXPR_PRE_INC:
+        case UNARY_EXPR_PRE_DEC:
+        case UNARY_EXPR_POST_INC:
+        case UNARY_EXPR_POST_DEC:
+            if (type_is_prim_type(arg_type, PRIM_TYPE_FLOAT))
+                return arg_type;
+            [[fallthrough]];
+        case UNARY_EXPR_BIT_NOT:
+        case UNARY_EXPR_NOT:
+            if (type_is_prim_type(arg_type, PRIM_TYPE_INT))
+                return arg_type;
+            if (type_is_prim_type(arg_type, PRIM_TYPE_BOOL))
+                return arg_type;
+            break;
+        default:
+            assert(false && "unknown built-in unary operator");
+            break;
+    }
+
+    char* type_string = type_to_string(arg_type, &type_checker->type_print_options);
+    log_error(type_checker->log, &ast->loc,
+        "invalid type '%s' for operator '%s'",
+        type_string, unary_expr_tag_to_string(ast->unary_expr.tag));
+    free(type_string);
+    return type_table_make_error_type(type_checker->type_table);
 }
 
 static const struct type* check_unary_expr(
@@ -872,13 +1030,33 @@ static const struct type* check_unary_expr(
     if (!check_call_args(type_checker, ast->unary_expr.arg))
         return ast->type = type_table_make_error_type(type_checker->type_table);
 
-    const char* func_name = unary_expr_tag_to_func_name(ast->unary_expr.tag);
-    struct ast* symbol = find_func_or_struct_with_name(type_checker, &ast->loc, func_name, expected_type, ast->unary_expr.arg);
-    if (!symbol || symbol->tag == AST_STRUCT_DECL)
-        return ast->type = type_table_make_error_type(type_checker->type_table);
+    if (are_all_prim_or_closure_type(ast->unary_expr.arg)) {
+        ast->type = check_builtin_unary_expr(type_checker, ast);
+    } else {
+        const char* func_name = unary_expr_tag_to_func_name(ast->unary_expr.tag);
 
-    ast->unary_expr.symbol = symbol;
-    ast->type = find_func_ret_type(symbol);
+        // Add dummy `1` argument for increment (resp. decrement) operators, which use a binary `+`
+        // (resp. `-`) under the hood.
+        struct ast one = {
+            .tag = AST_INT_LITERAL,
+            .type = type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_INT),
+            .loc = ast->loc,
+            .int_literal = 1
+        };
+        const struct type* ret_type = expected_type;
+        if (unary_expr_tag_is_inc_or_dec(ast->unary_expr.tag)) {
+            expect_mutable(type_checker, ast->unary_expr.arg);
+            ret_type = ast->unary_expr.arg->type;
+            ast->unary_expr.arg->next = &one;
+        }
+
+        struct ast* symbol = find_func_or_struct_with_name(type_checker, &ast->loc, func_name, ret_type, ast->unary_expr.arg);
+        if (!symbol || symbol->tag == AST_STRUCT_DECL)
+            return ast->type = type_table_make_error_type(type_checker->type_table);
+
+        ast->unary_expr.symbol = symbol;
+        ast->type = find_func_ret_type(symbol);
+    }
 
     return coerce_expr(type_checker, ast, expected_type);
 }
@@ -911,6 +1089,62 @@ static const struct type* check_compound_init(
     return coerce_expr(type_checker, ast, expected_type);
 }
 
+static inline bool are_all_scalar(struct ast* ast) {
+    for (; ast; ast = ast->next) {
+        if (!type_is_scalar(ast->type))
+            return false;
+    }
+    return true;
+}
+
+static enum constructor_type find_constructor_type(const struct type* type, struct ast* args) {
+    switch (ast_list_size(args)) {
+        case 1:
+            if (type_is_scalar(args->type)) {
+                if (type_is_scalar(type))
+                    return CONSTRUCTOR_TYPE_SCALAR;
+                else if (type_is_triple(type))
+                    return CONSTRUCTOR_TYPE_TRIPLE_FROM_SINGLE_SCALAR;
+                else if (type_is_matrix(type))
+                    return CONSTRUCTOR_TYPE_MATRIX_FROM_SINGLE_SCALAR;
+            } else if (type_is_string(args->type) && type_is_string(type)) {
+                return CONSTRUCTOR_TYPE_STRING;
+            }
+            break;
+        case 2:
+            if (type_is_string(args->type)) {
+                if (type_is_scalar(args->next->type)) {
+                    if (type_is_triple(type))
+                        return CONSTRUCTOR_TYPE_TRIPLE_FROM_SINGLE_SCALAR_AND_SPACE;
+                    else if (type_is_matrix(type))
+                        return CONSTRUCTOR_TYPE_MATRIX_FROM_SINGLE_SCALAR_AND_SPACE;
+                } else if (type_is_string(args->next->type) && type_is_matrix(type)) {
+                    return CONSTRUCTOR_TYPE_MATRIX_FROM_TWO_SPACES;
+                }
+            }
+            break;
+        case 3:
+            if (are_all_scalar(args) && type_is_triple(type))
+                return CONSTRUCTOR_TYPE_TRIPLE_FROM_MULTI_SCALARS;
+            break;
+        case 4:
+            if (type_is_string(args->type) && are_all_scalar(args->next) && type_is_triple(type))
+                return CONSTRUCTOR_TYPE_TRIPLE_FROM_MULTI_SCALARS_AND_SPACE;
+            break;
+        case 16:
+            if (are_all_scalar(args) && type_is_matrix(type))
+                return CONSTRUCTOR_TYPE_MATRIX_FROM_MULTI_SCALARS;
+            break;
+        case 17:
+            if (type_is_string(args->type) && are_all_scalar(args->next) && type_is_matrix(type))
+                return CONSTRUCTOR_TYPE_MATRIX_FROM_MULTI_SCALARS_AND_SPACE;
+            break;
+        default:
+            break;
+    }
+    return CONSTRUCTOR_TYPE_INVALID;
+}
+
 static const struct type* check_construct_expr(
     struct type_checker* type_checker,
     struct ast* ast,
@@ -922,18 +1156,35 @@ static const struct type* check_construct_expr(
     if (!check_call_args(type_checker, ast->construct_expr.args))
         return type_table_make_error_type(type_checker->type_table);
 
-    struct small_ast_vec candidates;
-    small_ast_vec_init(&candidates);
-    struct ast_vec* constructors = &type_checker->constructors[type->prim_type];
-    for (size_t i = 0; i < constructors->elem_count; ++i)
-        small_ast_vec_push(&candidates, &constructors->elems[i]);
-    struct ast* symbol = find_func_from_candidates(type_checker, &ast->loc,
-        prim_type_tag_to_string(type->prim_type), candidates.elems, candidates.elem_count, type, ast->construct_expr.args);
-    small_ast_vec_destroy(&candidates);
-    if (!symbol)
-        return type_table_make_error_type(type_checker->type_table);
+    ast->construct_expr.constructor_type = find_constructor_type(type, ast->construct_expr.args);
 
-    assert(find_func_ret_type(symbol) == type);
+    struct ast* first_arg = ast->construct_expr.args;
+    switch (ast->construct_expr.constructor_type) {
+        // Simplify code generation by coercing the arguments to float for triple and matrix constructors.
+        case CONSTRUCTOR_TYPE_TRIPLE_FROM_SINGLE_SCALAR_AND_SPACE:
+        case CONSTRUCTOR_TYPE_MATRIX_FROM_SINGLE_SCALAR_AND_SPACE:
+        case CONSTRUCTOR_TYPE_TRIPLE_FROM_MULTI_SCALARS_AND_SPACE:
+        case CONSTRUCTOR_TYPE_MATRIX_FROM_MULTI_SCALARS_AND_SPACE:
+            first_arg = first_arg->next;
+            [[fallthrough]];
+        case CONSTRUCTOR_TYPE_TRIPLE_FROM_SINGLE_SCALAR:
+        case CONSTRUCTOR_TYPE_MATRIX_FROM_SINGLE_SCALAR:
+        case CONSTRUCTOR_TYPE_TRIPLE_FROM_MULTI_SCALARS:
+        case CONSTRUCTOR_TYPE_MATRIX_FROM_MULTI_SCALARS: {
+            const struct type* float_type = type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_FLOAT);
+            for (struct ast* arg = first_arg; arg; arg = arg->next)
+                coerce_expr(type_checker, arg, float_type);
+            break;
+        }
+        case CONSTRUCTOR_TYPE_INVALID:
+            char* signature_string = call_signature_to_string(type_checker, type, ast->construct_expr.args);
+            log_error(type_checker->log, &ast->loc, "invalid constructor call with signature '%s'", signature_string);
+            free(signature_string);
+            return type_table_make_error_type(type_checker->type_table);
+        default:
+            break;
+    }
+
     ast->type = type;
     return coerce_expr(type_checker, ast, expected_type);
 }
@@ -980,7 +1231,7 @@ static const struct type* check_index_expr(
     const struct type* value_type = check_expr(type_checker, ast->index_expr.value->index_expr.value, NULL);
     check_expr(type_checker, ast->index_expr.index, int_type);
     check_expr(type_checker, ast->index_expr.value->index_expr.index, int_type);
-    if (type_is_prim_type(value_type, PRIM_TYPE_MATRIX)) {
+    if (type_is_matrix(value_type)) {
         ast->type = type_table_make_prim_type(type_checker->type_table, PRIM_TYPE_FLOAT);
     } else {
         value_type = check_single_index_expr(type_checker, &ast->index_expr.value->index_expr.value->loc, value_type);
@@ -1057,17 +1308,17 @@ static const struct type* check_cast_expr(
 }
 
 static inline const struct type* check_literal(struct type_checker* type_checker, struct ast* ast) {
-    enum prim_type_tag tag = PRIM_TYPE_VOID;
+    enum prim_type prim_type = PRIM_TYPE_VOID;
     switch (ast->tag) {
-        case AST_INT_LITERAL:    tag = PRIM_TYPE_INT;    break;
-        case AST_FLOAT_LITERAL:  tag = PRIM_TYPE_FLOAT;  break;
-        case AST_BOOL_LITERAL:   tag = PRIM_TYPE_BOOL;   break;
-        case AST_STRING_LITERAL: tag = PRIM_TYPE_STRING; break;
+        case AST_INT_LITERAL:    prim_type = PRIM_TYPE_INT;    break;
+        case AST_FLOAT_LITERAL:  prim_type = PRIM_TYPE_FLOAT;  break;
+        case AST_BOOL_LITERAL:   prim_type = PRIM_TYPE_BOOL;   break;
+        case AST_STRING_LITERAL: prim_type = PRIM_TYPE_STRING; break;
         default:
             assert(false && "invalid AST literal");
             break;
     }
-    return ast->type = type_table_make_prim_type(type_checker->type_table, tag);
+    return ast->type = type_table_make_prim_type(type_checker->type_table, prim_type);
 }
 
 static const struct type* check_expr(
@@ -1104,10 +1355,8 @@ static const struct type* check_expr(
 }
 
 static void check_struct_decl(struct type_checker* type_checker, struct ast* ast) {
-    static const char* operator_prefix = "__operator__";
-    if (!strncmp(ast->struct_decl.name, operator_prefix, strlen(operator_prefix))) {
-        log_error(type_checker->log, &ast->loc, "structure name '%s' is not allowed", ast->struct_decl.name);
-        log_note(type_checker->log, NULL, "names beginning with '%s' are reserved for functions", operator_prefix);
+    if (func_name_is_operator(ast->struct_decl.name)) {
+        report_invalid_operator(type_checker, &ast->loc, ast->struct_decl.name, "structure");
         return;
     }
 
@@ -1168,7 +1417,5 @@ void check(
     };
     for (; ast; ast = ast->next)
         check_top_level_decl(&type_checker, ast);
-    for (size_t i = 0; i < PRIM_TYPE_COUNT; ++i)
-        ast_vec_destroy(&type_checker.constructors[i]);
     env_destroy(type_checker.env);
 }

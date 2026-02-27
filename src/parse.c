@@ -313,10 +313,11 @@ static struct ast* parse_pre_unary_expr(struct parser* parser) {
     struct file_loc begin_loc = parser->ahead->loc;
     enum unary_expr_tag tag = UNARY_EXPR_NOT;
     switch (parser->ahead->tag) {
-        case TOKEN_NOT: tag = UNARY_EXPR_NOT;     break;
-        case TOKEN_SUB: tag = UNARY_EXPR_NEG;     break;
-        case TOKEN_INC: tag = UNARY_EXPR_PRE_INC; break;
-        case TOKEN_DEC: tag = UNARY_EXPR_PRE_DEC; break;
+        case TOKEN_TILDE: tag = UNARY_EXPR_BIT_NOT; break;
+        case TOKEN_NOT:   tag = UNARY_EXPR_NOT;     break;
+        case TOKEN_SUB:   tag = UNARY_EXPR_NEG;     break;
+        case TOKEN_INC:   tag = UNARY_EXPR_PRE_INC; break;
+        case TOKEN_DEC:   tag = UNARY_EXPR_PRE_DEC; break;
         default:
             assert(false && "invalid prefix unary operation");
             break;
@@ -334,6 +335,7 @@ static struct ast* parse_pre_unary_expr(struct parser* parser) {
 
 static struct ast* parse_prefix_expr(struct parser* parser) {
     switch (parser->ahead->tag) {
+        case TOKEN_TILDE:
         case TOKEN_NOT:
         case TOKEN_SUB:
         case TOKEN_INC:
@@ -502,41 +504,46 @@ static struct ast* parse_expr(struct parser* parser) {
 
 static struct ast* parse_prim_type(struct parser* parser) {
     struct file_loc begin_loc = parser->ahead->loc;
-    bool is_closure = accept_token(parser, TOKEN_CLOSURE);
-    enum prim_type_tag tag = PRIM_TYPE_VOID;
+    enum prim_type prim_type = PRIM_TYPE_VOID;
     switch (parser->ahead->tag) {
-#define x(name, ...) case TOKEN_##name: tag = PRIM_TYPE_##name; break;
+#define x(name, ...) case TOKEN_##name: prim_type = PRIM_TYPE_##name; break;
         PRIM_TYPE_LIST(x)
 #undef x
         default:
-            assert(false && "invalid prim type tag");
-            break;
+            return parse_error(parser, "primitive type");
     }
     read_token(parser);
     return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_PRIM_TYPE,
-        .prim_type = {
-            .is_closure = is_closure,
-            .tag = tag
-        }
+        .prim_type = prim_type
     });
 }
 
 static struct ast* parse_shader_type(struct parser* parser) {
     struct file_loc begin_loc = parser->ahead->loc;
-    enum shader_type_tag tag = SHADER_TYPE_SHADER;
+    enum shader_type shader_type = SHADER_TYPE_SHADER;
     switch (parser->ahead->tag) {
-#define x(name, ...) case TOKEN_##name: tag = SHADER_TYPE_##name; break;
+#define x(name, ...) case TOKEN_##name: shader_type = SHADER_TYPE_##name; break;
         SHADER_TYPE_LIST(x)
 #undef x
         default:
-            assert(false && "invalid prim type tag");
+            assert(false && "invalid shader type");
             break;
     }
     read_token(parser);
     return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_SHADER_TYPE,
-        .shader_type.tag = tag
+        .shader_type = shader_type
+    });
+}
+
+static struct ast* parse_closure_type(struct parser* parser) {
+    struct file_loc begin_loc = parser->ahead->loc;
+    eat_token(parser, TOKEN_CLOSURE);
+    struct ast* inner_type = parse_prim_type(parser);
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
+        .tag = AST_CLOSURE_TYPE,
+        .closure_type.inner_type = inner_type
     });
 }
 
@@ -554,8 +561,9 @@ static struct ast* parse_type(struct parser* parser) {
 #define x(name, ...) case TOKEN_##name:
         PRIM_TYPE_LIST(x)
 #undef x
-        case TOKEN_CLOSURE:
             return parse_prim_type(parser);
+        case TOKEN_CLOSURE:
+            return parse_closure_type(parser);
         case TOKEN_IDENT:
             return parse_named_type(parser);
         default:

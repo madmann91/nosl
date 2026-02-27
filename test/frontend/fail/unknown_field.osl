@@ -1,0 +1,8 @@
+struct S {
+    int a, b;
+};
+
+shader test() {
+    S s = S(1, 2);
+    s.c;
+}

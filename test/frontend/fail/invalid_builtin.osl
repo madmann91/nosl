@@ -1,0 +1,2 @@
+__attribute__((builtin)) void foo() {}
+shader test() {}

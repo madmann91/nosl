@@ -1,0 +1,4 @@
+shader test(output string s = "") {
+    s++;
+    s += 1;
+}

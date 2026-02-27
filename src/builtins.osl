@@ -1,13 +1,8 @@
-// This file contains all the functions of the standard library and constructors for standard types.
+// This file contains all the functions of the standard library.
 // Some attributes are used to control how these built-in functions are implemented:
 //
-// - Functions marked with `__attribute__((builtin))`: Those functions do not have a body, and it is
+// - Functions marked with `__attribute__((builtin))`: Such functions do not have a body, and it is
 //   assumed that the backend knows how to emit code for them.
-//
-// - Functions marked with `__attribute__((constructor))`: Those functions are not callable like
-//   regular functions, but can only be called via "constructor expressions" (e.g. `color(1)`).
-//   Their name does not matter, as they are not considered when calling functions. Instead, they
-//   are connected to the type that they return, and thus must return a primitive type.
 //
 // - Functions marked with `__attribute__((always_inline))`: Those functions will always get inlined
 //   in the generated code, to minimize the code size and maximize its speed.
@@ -32,9 +27,9 @@
 
 #define PER_TRIPLE(inst, ...) \
     inst(vector, __VA_ARGS__) \
+    inst(color, __VA_ARGS__) \
     inst(point, __VA_ARGS__) \
-    inst(normal, __VA_ARGS__) \
-    inst(color, __VA_ARGS__)
+    inst(normal, __VA_ARGS__)
 
 #define DET2(m00, m01, m10, m11) (m00 * m01 - m10 * m11)
 
@@ -90,105 +85,6 @@ __attribute__((builtin)) int regex_search(string, int[], string);
 __attribute__((builtin)) int regex_match(string, string);
 __attribute__((builtin)) int regex_match(string, int[], string);
 
-// Bool functions ---------------------------------------------------------------------------------
-
-__attribute__((builtin)) bool __operator__bitand__(bool, bool);
-__attribute__((builtin)) bool __operator__xor__(bool, bool);
-__attribute__((builtin)) bool __operator__bitor__(bool, bool);
-__attribute__((builtin)) bool __operator__eq__(bool, bool);
-__attribute__((builtin)) bool __operator__ne__(bool, bool);
-__attribute__((builtin)) bool __operator__not__(bool);
-__attribute__((builtin)) bool __operator__compl__(bool);
-
-__attribute__((always_inline, constructor)) bool __construct__(bool b) { return b; }
-__attribute__((always_inline, constructor)) bool __construct__(int i) { return (bool)i; }
-__attribute__((always_inline, constructor)) bool __construct__(float f) { return (bool)f; }
-
-// Int functions ----------------------------------------------------------------------------------
-
-__attribute__((builtin)) int __operator__add__(int, int);
-__attribute__((builtin)) int __operator__sub__(int, int);
-__attribute__((builtin)) int __operator__mul__(int, int);
-__attribute__((builtin)) int __operator__mod__(int, int);
-__attribute__((builtin)) int __operator__div__(int, int);
-__attribute__((builtin)) int __operator__shl__(int, int);
-__attribute__((builtin)) int __operator__shr__(int, int);
-__attribute__((builtin)) int __operator__bitand__(int, int);
-__attribute__((builtin)) int __operator__xor__(int, int);
-__attribute__((builtin)) int __operator__bitor__(int, int);
-__attribute__((builtin)) bool __operator__eq__(int, int);
-__attribute__((builtin)) bool __operator__ne__(int, int);
-__attribute__((builtin)) bool __operator__gt__(int, int);
-__attribute__((builtin)) bool __operator__ge__(int, int);
-__attribute__((builtin)) bool __operator__lt__(int, int);
-__attribute__((builtin)) bool __operator__le__(int, int);
-__attribute__((builtin)) int __operator__neg__(int);
-__attribute__((builtin)) int __operator__not__(int);
-__attribute__((builtin)) int __operator__compl__(int);
-__attribute__((builtin)) int __operator__pre_inc__(output int);
-__attribute__((builtin)) int __operator__pre_dec__(output int);
-__attribute__((builtin)) int __operator__post_inc__(output int);
-__attribute__((builtin)) int __operator__post_dec__(output int);
-
-__attribute__((always_inline, constructor)) int __construct__(bool b) { return (int)b; }
-__attribute__((always_inline, constructor)) int __construct__(int i) { return i; }
-__attribute__((always_inline, constructor)) int __construct__(float f) { return (int)f; }
-
-// Float functions --------------------------------------------------------------------------------
-
-__attribute__((builtin)) float __operator__add__(float, float);
-__attribute__((builtin)) float __operator__sub__(float, float);
-__attribute__((builtin)) float __operator__mul__(float, float);
-__attribute__((builtin)) float __operator__div__(float, float);
-__attribute__((builtin)) bool __operator__eq__(float, float);
-__attribute__((builtin)) bool __operator__ne__(float, float);
-__attribute__((builtin)) bool __operator__gt__(float, float);
-__attribute__((builtin)) bool __operator__ge__(float, float);
-__attribute__((builtin)) bool __operator__lt__(float, float);
-__attribute__((builtin)) bool __operator__le__(float, float);
-__attribute__((builtin)) float __operator__neg__(float);
-__attribute__((builtin)) float __operator__pre_inc__(output float);
-__attribute__((builtin)) float __operator__pre_dec__(output float);
-__attribute__((builtin)) float __operator__post_inc__(output float);
-__attribute__((builtin)) float __operator__post_dec__(output float);
-
-__attribute__((always_inline, constructor)) float __construct__(bool b) { return (float)b; }
-__attribute__((always_inline, constructor)) float __construct__(int i) { return (float)i; }
-__attribute__((always_inline, constructor)) float __construct__(float f) { return f; }
-
-// Triple functions -------------------------------------------------------------------------------
-
-#define TRIPLE_OPERATORS(type, ignored) \
-    __attribute__((always_inline)) type __operator__add__(type x, type y) { return { x[0] + y[0], x[1] + y[1], x[2] + y[2] }; } \
-    __attribute__((always_inline)) vector __operator__sub__(type x, type y) { return { x[0] - y[0], x[1] - y[1], x[2] - y[2] }; } \
-    __attribute__((always_inline)) type __operator__mul__(type x, type y) { return { x[0] * y[0], x[1] * y[1], x[2] * y[2] }; } \
-    __attribute__((always_inline)) type __operator__mul__(float x, type y) { return { x * y[0], x * y[1], x * y[2] }; } \
-    __attribute__((always_inline)) type __operator__mul__(type x, float y) { return y * x; } \
-    __attribute__((always_inline)) type __operator__div__(type x, type y) { return { x[0] / y[0], x[1] / y[1], x[2] / y[2] }; } \
-    __attribute__((always_inline)) bool __operator__eq__(type x, type y) { return x[0] == y[0] && x[1] == y[1] && x[2] == y[2]; } \
-    __attribute__((always_inline)) bool __operator__ne__(type x, type y) { return !(x == y); } \
-    __attribute__((always_inline)) vector __operator__neg__(type x) { return { -x[0], -x[1], -x[2] }; }
-
-PER_TRIPLE(TRIPLE_OPERATORS,)
-
-#undef TRIPLE_OPERATORS
-
-// Allow adding a point and a vector together.
-__attribute__((always_inline)) point __operator__add__(point p, vector v) { return p + (point)v; }
-__attribute__((always_inline)) point __operator__add__(vector v, point p) { return p + v; }
-
-// Allow multiplying a color by a vector.
-__attribute__((always_inline)) color __operator__mul__(vector x, color y) { return (color)x * y; }
-__attribute__((always_inline)) color __operator__mul__(color x, vector y) { return x * (color)y; }
-
-__attribute__((constructor, always_inline)) vector __construct__(float x) { return x; }
-__attribute__((constructor, always_inline)) point  __construct__(float x) { return x; }
-__attribute__((constructor, always_inline)) normal __construct__(float x) { return x; }
-
-__attribute__((constructor, always_inline)) vector __construct__(float x, float y, float z) { return { x, y, z }; }
-__attribute__((constructor, always_inline)) point  __construct__(float x, float y, float z) { return { x, y, z }; }
-__attribute__((constructor, always_inline)) normal __construct__(float x, float y, float z) { return { x, y, z }; }
-
 // Color functions --------------------------------------------------------------------------------
 
 __attribute__((builtin)) float luminance(color);
@@ -197,119 +93,9 @@ __attribute__((builtin)) color wavelength_color(float);
 __attribute__((builtin)) color transformc(string, string, color);
 __attribute__((always_inline)) color transformc(string space, color c) { return transformc("rgb", space, c); }
 
-__attribute__((constructor, always_inline)) color __construct__(float intensity) {
-    return intensity;
-}
-
-__attribute__((constructor, always_inline)) color __construct__(float r, float g, float b) {
-    return { r, g, b };
-}
-
-__attribute__((constructor, always_inline)) color __construct__(string space, float intensity) {
-    return transformc(space, "rgb", color(intensity));
-}
-
-__attribute__((constructor, always_inline)) color __construct__(string space, float r, float g, float b) {
-    return transformc(space, "rgb", color(r, g, b));
-}
-
 // Matrix functions -------------------------------------------------------------------------------
 
 __attribute__((builtin)) int getmatrix(string, string, output matrix);
-
-__attribute__((always_inline)) matrix __operator__add__(matrix a, matrix b) {
-    return {
-        a[0][0] + b[0][0], a[0][1] + b[0][1], a[0][2] + b[0][2], a[0][3] + b[0][3],
-        a[1][0] + b[1][0], a[1][1] + b[1][1], a[1][2] + b[1][2], a[1][3] + b[1][3],
-        a[2][0] + b[2][0], a[2][1] + b[2][1], a[2][2] + b[2][2], a[2][3] + b[2][3],
-        a[3][0] + b[3][0], a[3][1] + b[3][1], a[3][2] + b[3][2], a[3][3] + b[3][3]
-    };
-}
-
-__attribute__((always_inline)) matrix __operator__sub__(matrix a, matrix b) {
-    return {
-        a[0][0] - b[0][0], a[0][1] - b[0][1], a[0][2] - b[0][2], a[0][3] - b[0][3],
-        a[1][0] - b[1][0], a[1][1] - b[1][1], a[1][2] - b[1][2], a[1][3] - b[1][3],
-        a[2][0] - b[2][0], a[2][1] - b[2][1], a[2][2] - b[2][2], a[2][3] - b[2][3],
-        a[3][0] - b[3][0], a[3][1] - b[3][1], a[3][2] - b[3][2], a[3][3] - b[3][3]
-    };
-}
-
-__attribute__((always_inline)) matrix __operator__mul__(matrix a, matrix b) {
-    return {
-        a[0][0] * b[0][0] + a[0][1] * b[1][0] + a[0][2] * b[2][0] + a[0][3] * b[3][0],
-        a[0][0] * b[0][1] + a[0][1] * b[1][1] + a[0][2] * b[2][1] + a[0][3] * b[3][1],
-        a[0][0] * b[0][2] + a[0][1] * b[1][2] + a[0][2] * b[2][2] + a[0][3] * b[3][2],
-        a[0][0] * b[0][3] + a[0][1] * b[1][3] + a[0][2] * b[2][3] + a[0][3] * b[3][3],
-
-        a[1][0] * b[0][0] + a[1][1] * b[1][0] + a[1][2] * b[2][0] + a[1][3] * b[3][0],
-        a[1][0] * b[0][1] + a[1][1] * b[1][1] + a[1][2] * b[2][1] + a[1][3] * b[3][1],
-        a[1][0] * b[0][2] + a[1][1] * b[1][2] + a[1][2] * b[2][2] + a[1][3] * b[3][2],
-        a[1][0] * b[0][3] + a[1][1] * b[1][3] + a[1][2] * b[2][3] + a[1][3] * b[3][3],
-
-        a[2][0] * b[0][0] + a[2][1] * b[1][0] + a[2][2] * b[2][0] + a[2][3] * b[3][0],
-        a[2][0] * b[0][1] + a[2][1] * b[1][1] + a[2][2] * b[2][1] + a[2][3] * b[3][1],
-        a[2][0] * b[0][2] + a[2][1] * b[1][2] + a[2][2] * b[2][2] + a[2][3] * b[3][2],
-        a[2][0] * b[0][3] + a[2][1] * b[1][3] + a[2][2] * b[2][3] + a[2][3] * b[3][3],
-
-        a[3][0] * b[0][0] + a[3][1] * b[1][0] + a[3][2] * b[2][0] + a[3][3] * b[3][0],
-        a[3][0] * b[0][1] + a[3][1] * b[1][1] + a[3][2] * b[2][1] + a[3][3] * b[3][1],
-        a[3][0] * b[0][2] + a[3][1] * b[1][2] + a[3][2] * b[2][2] + a[3][3] * b[3][2],
-        a[3][0] * b[0][3] + a[3][1] * b[1][3] + a[3][2] * b[2][3] + a[3][3] * b[3][3]
-    };
-}
-
-__attribute__((always_inline)) matrix __operator__mul__(float f, matrix m) {
-    return {
-        m[0][0] * f, m[0][1] * f, m[0][2] * f, m[0][3] * f,
-        m[1][0] * f, m[1][1] * f, m[1][2] * f, m[1][3] * f,
-        m[2][0] * f, m[2][1] * f, m[2][2] * f, m[2][3] * f,
-        m[3][0] * f, m[3][1] * f, m[3][2] * f, m[3][3] * f
-    };
-}
-
-__attribute__((always_inline)) matrix __operator__mul__(matrix m, float f) {
-    return f * m;
-}
-
-__attribute__((constructor, always_inline)) matrix __construct__(float x) { return x; }
-
-__attribute__((constructor, always_inline))
-matrix __construct__(
-    float m00, float m01, float m02, float m03,
-    float m10, float m11, float m12, float m13,
-    float m20, float m21, float m22, float m23,
-    float m30, float m31, float m32, float m33)
-{
-    return { m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23, m30, m31, m32, m33 };
-}
-
-__attribute__((constructor, always_inline)) matrix __construct__(string from, string to) {
-    matrix result = 1;
-    if (getmatrix(from, to, result) == 0)
-        error("cannot construct matrix from space %s to %s", from, to);
-    return result;
-}
-
-__attribute__((constructor, always_inline)) matrix __construct__(string space, float x) {
-    return matrix(space, "common") * x;
-}
-
-__attribute__((constructor, always_inline))
-matrix __construct__(
-    string space,
-    float m00, float m01, float m02, float m03,
-    float m10, float m11, float m12, float m13,
-    float m20, float m21, float m22, float m23,
-    float m30, float m31, float m32, float m33)
-{
-    return matrix(space, "common") * {
-        m00, m01, m02, m03,
-        m10, m11, m12, m13,
-        m20, m21, m22, m23,
-        m30, m31, m32, m33
-    };
-}
 
 __attribute__((always_inline)) float determinant(matrix m) {
     return DET4(
@@ -348,10 +134,6 @@ __attribute__((always_inline)) matrix inverse(matrix m) {
     inv[3][3] =  inv_det * DET3(m[0][0], m[0][1], m[0][2], m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2]);
 
     return inv;
-}
-
-__attribute__((always_inline)) matrix __operator__div__(matrix m, matrix n) {
-    return m * inverse(n);
 }
 
 __attribute__((always_inline)) matrix transpose(matrix m) {
@@ -502,14 +284,6 @@ __attribute__((always_inline)) normal transform(matrix m, normal n) {
 __attribute__((always_inline)) vector transform(string from, string to, vector v) { return transform(matrix(from, to), v); }
 __attribute__((always_inline)) point  transform(string from, string to, point  p) { return transform(matrix(from, to), p); }
 __attribute__((always_inline)) normal transform(string from, string to, normal n) { return transform(matrix(from, to), n); }
-
-__attribute__((constructor, always_inline)) vector __construct__(string space, float x, float y, float z) { return transform(space, "common", vector(x, y, z)); }
-__attribute__((constructor, always_inline)) point  __construct__(string space, float x, float y, float z) { return transform(space, "common", point(x, y, z)); }
-__attribute__((constructor, always_inline)) normal __construct__(string space, float x, float y, float z) { return transform(space, "common", normal(x, y, z)); }
-
-__attribute__((constructor, always_inline)) vector __construct__(string space, float x) { return vector(space, x, x, x); }
-__attribute__((constructor, always_inline)) point  __construct__(string space, float x) { return point(space, x, x, x); }
-__attribute__((constructor, always_inline)) normal __construct__(string space, float x) { return normal(space, x, x, x); }
 
 __attribute__((always_inline)) vector transform(string space, vector v) { return transform("common", space, v); }
 __attribute__((always_inline)) point  transform(string space, point  p) { return transform("common", space, p); }

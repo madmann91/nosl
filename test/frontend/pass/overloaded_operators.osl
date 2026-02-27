@@ -1,0 +1,62 @@
+struct S {
+    float x;
+};
+
+S __operator__mul__(S s1, S s2) {}
+S __operator__div__(S s1, S s2) {}
+S __operator__mod__(S s1, S s2) {}
+S __operator__add__(S s1, float f) {}
+S __operator__add__(S s1, S s2) {}
+S __operator__sub__(S s1, float) {}
+S __operator__sub__(S s1, S s2) {}
+S __operator__shl__(S s1, S s2) {}
+S __operator__shr__(S s1, S s2) {}
+bool __operator__lt__(S s1, S s2) {}
+bool __operator__le__(S s1, S s2) {}
+bool __operator__gt__(S s1, S s2) {}
+bool __operator__ge__(S s1, S s2) {}
+bool __operator__ne__(S s1, S s2) {}
+bool __operator__eq__(S s1, S s2) {}
+S __operator__bitand__(S s1, S s2) {}
+S __operator__xor__(S s1, S s2) {}
+S __operator__bitor__(S s1, S s2) {}
+S __operator__neg__(S s) {}
+S __operator__compl__(S s) {}
+S __operator__not__(S s) {}
+
+shader test() {
+    S s1 = S(1);
+    S s2 = S(2);
+
+    { S s = s1 * s2; }
+    { S s = s1 / s2; }
+    { S s = s1 % s2; }
+    { S s = s1 + s2; }
+    { S s = s1 - s2; }
+    { S s = s1 << s2; }
+    { S s = s1 >> s2; }
+    { bool b = s1 < s2; }
+    { bool b = s1 > s2; }
+    { bool b = s1 <= s2; }
+    { bool b = s1 >= s2; }
+    { bool b = s1 == s2; }
+    { bool b = s1 != s2; }
+    { S s = s1 & s2; }
+    { S s = s1 ^ s2; }
+    { S s = s1 | s2; }
+    { ++s1; }
+    { --s1; }
+    { s1++; }
+    { s1--; }
+    { S s = -s1; }
+    { S s = ~s1; }
+    { S s = !s1; }
+
+    { s1 *= s2; }
+    { s1 /= s2; }
+    { s1 %= s2; }
+    { s1 += s2; }
+    { s1 -= s2; }
+    { s1 <<= s2; }
+    { s1 >>= s2; }
+}

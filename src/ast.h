@@ -67,12 +67,14 @@
     LOGIC_EXPR_LIST(x)
 
 enum unary_expr_tag {
+    UNARY_EXPR_INVALID,
 #define x(name, ...) UNARY_EXPR_##name,
     UNARY_EXPR_LIST(x)
 #undef x
 };
 
 enum binary_expr_tag {
+    BINARY_EXPR_INVALID,
 #define x(name, ...) BINARY_EXPR_##name,
     BINARY_EXPR_LIST(x)
 #undef x
@@ -85,6 +87,7 @@ enum ast_tag {
 
     // Types
     AST_PRIM_TYPE,
+    AST_CLOSURE_TYPE,
     AST_SHADER_TYPE,
     AST_NAMED_TYPE,
 
@@ -129,8 +132,6 @@ enum ast_tag {
     AST_EMPTY_STMT
 };
 
-struct type;
-
 struct ast {
     enum ast_tag tag;
     const struct type* type;
@@ -142,17 +143,15 @@ struct ast {
         int_literal int_literal;
         float_literal float_literal;
         const char* string_literal;
+        enum prim_type prim_type;
+        enum shader_type shader_type;
         struct {
             const char* name;
             struct ast* args;
         } attr;
         struct {
-            bool is_closure;
-            enum prim_type_tag tag;
-        } prim_type;
-        struct {
-            enum shader_type_tag tag;
-        } shader_type;
+            struct ast* inner_type;
+        } closure_type;
         struct {
             const char* name;
             struct ast* symbol;
@@ -216,6 +215,7 @@ struct ast {
         struct {
             struct ast* type;
             struct ast* args;
+            enum constructor_type constructor_type;
         } construct_expr;
         struct {
             struct ast* elems;
@@ -288,9 +288,13 @@ SMALL_VEC_DECL(small_ast_vec, struct ast*, PUBLIC)
 [[nodiscard]] const char* unary_expr_tag_to_string(enum unary_expr_tag);
 [[nodiscard]] const char* binary_expr_tag_to_func_name(enum binary_expr_tag);
 [[nodiscard]] const char* unary_expr_tag_to_func_name(enum unary_expr_tag);
+[[nodiscard]] bool func_name_is_binary_operator(const char*);
+[[nodiscard]] bool func_name_is_unary_operator(const char*);
+[[nodiscard]] bool func_name_is_operator(const char*);
 [[nodiscard]] enum binary_expr_tag binary_expr_tag_remove_assign(enum binary_expr_tag);
 [[nodiscard]] bool binary_expr_tag_is_assign(enum binary_expr_tag);
 [[nodiscard]] bool binary_expr_tag_is_logic(enum binary_expr_tag);
+[[nodiscard]] bool binary_expr_tag_is_shift(enum binary_expr_tag);
 [[nodiscard]] bool unary_expr_tag_is_inc_or_dec(enum unary_expr_tag);
 
 void ast_print(FILE*, const struct ast*, const struct ast_print_options*);

@@ -185,12 +185,12 @@ const struct type* type_table_make_error_type(struct type_table* type_table) {
     return insert_type(type_table, &(struct type) { .tag = TYPE_ERROR });
 }
 
-const struct type* type_table_make_prim_type(struct type_table* type_table, enum prim_type_tag tag) {
-    return insert_type(type_table, &(struct type) { .tag = TYPE_PRIM, .prim_type = tag });
+const struct type* type_table_make_prim_type(struct type_table* type_table, enum prim_type prim_type) {
+    return insert_type(type_table, &(struct type) { .tag = TYPE_PRIM, .prim_type = prim_type });
 }
 
-const struct type* type_table_make_shader_type(struct type_table* type_table, enum shader_type_tag tag) {
-    return insert_type(type_table, &(struct type) { .tag = TYPE_SHADER, .shader_type = tag });
+const struct type* type_table_make_shader_type(struct type_table* type_table, enum shader_type shader_type) {
+    return insert_type(type_table, &(struct type) { .tag = TYPE_SHADER, .shader_type = shader_type });
 }
 
 const struct type* type_table_make_closure_type(

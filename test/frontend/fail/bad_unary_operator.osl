@@ -1,0 +1,3 @@
+struct S { int empty; };
+S __operator__not__(S x, S y) { return S(0); }
+shader foo() {}

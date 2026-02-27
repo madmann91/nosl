@@ -1,0 +1,3 @@
+shader test() {
+    unknown_function_with_complex_name();
+}

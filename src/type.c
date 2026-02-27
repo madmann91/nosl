@@ -17,16 +17,23 @@ struct styles {
 SMALL_VEC_IMPL(small_type_vec, const struct type*, PUBLIC)
 SMALL_VEC_IMPL(small_func_param_vec, struct func_param, PUBLIC)
 
-bool prim_type_tag_is_triple(enum prim_type_tag tag) {
+bool prim_type_is_scalar(enum prim_type prim_type) {
     return
-        tag == PRIM_TYPE_COLOR ||
-        tag == PRIM_TYPE_POINT ||
-        tag == PRIM_TYPE_VECTOR ||
-        tag == PRIM_TYPE_NORMAL;
+        prim_type == PRIM_TYPE_INT ||
+        prim_type == PRIM_TYPE_BOOL ||
+        prim_type == PRIM_TYPE_FLOAT;
 }
 
-size_t prim_type_tag_component_count(enum prim_type_tag tag) {
-    switch (tag) {
+bool prim_type_is_triple(enum prim_type prim_type) {
+    return
+        prim_type == PRIM_TYPE_COLOR ||
+        prim_type == PRIM_TYPE_POINT ||
+        prim_type == PRIM_TYPE_VECTOR ||
+        prim_type == PRIM_TYPE_NORMAL;
+}
+
+size_t prim_type_component_count(enum prim_type prim_type) {
+    switch (prim_type) {
 #define x(name, str, type, comp) case PRIM_TYPE_##name: return comp;
         PRIM_TYPE_LIST(x)
 #undef x
@@ -35,8 +42,8 @@ size_t prim_type_tag_component_count(enum prim_type_tag tag) {
     }
 }
 
-const char* prim_type_tag_to_string(enum prim_type_tag tag) {
-    switch (tag) {
+const char* prim_type_to_string(enum prim_type prim_type) {
+    switch (prim_type) {
 #define x(name, str, ...) case PRIM_TYPE_##name: return str;
         PRIM_TYPE_LIST(x)
 #undef x
@@ -46,8 +53,8 @@ const char* prim_type_tag_to_string(enum prim_type_tag tag) {
     }
 }
 
-const char* shader_type_tag_to_string(enum shader_type_tag tag) {
-    switch (tag) {
+const char* shader_type_to_string(enum shader_type shader_type) {
+    switch (shader_type) {
 #define x(name, str, ...) case SHADER_TYPE_##name: return str;
         SHADER_TYPE_LIST(x)
 #undef x
@@ -57,68 +64,78 @@ const char* shader_type_tag_to_string(enum shader_type_tag tag) {
     }
 }
 
-static enum coercion_rank type_coercion_rank_prim(const struct type* from, enum prim_type_tag to_tag) {
-    if (from->tag == TYPE_PRIM) {
-        if (from->prim_type == to_tag)
-            return COERCION_EXACT;
-
-        static const enum coercion_rank rank_matrix[PRIM_TYPE_COUNT][PRIM_TYPE_COUNT] = {
-#define x(name, ...) [PRIM_TYPE_##name][PRIM_TYPE_VOID] = COERCION_TO_VOID,
-            PRIM_TYPE_LIST(x)
+enum coercion_rank prim_type_coercion_rank(enum prim_type from, enum prim_type to) {
+    const enum coercion_rank coercion_rank_matrix[PRIM_TYPE_COUNT][PRIM_TYPE_COUNT] = {
+#define x(name, ...) \
+        [PRIM_TYPE_##name][PRIM_TYPE_VOID] = COERCION_TO_VOID,
+        PRIM_TYPE_LIST_WITHOUT_VOID(x)
 #undef x
-            [PRIM_TYPE_BOOL  ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
-            [PRIM_TYPE_INT   ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
-            [PRIM_TYPE_FLOAT ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
-            [PRIM_TYPE_BOOL  ][PRIM_TYPE_COLOR ] = COERCION_SCALAR_TO_COLOR,
-            [PRIM_TYPE_INT   ][PRIM_TYPE_COLOR ] = COERCION_SCALAR_TO_COLOR,
-            [PRIM_TYPE_FLOAT ][PRIM_TYPE_COLOR ] = COERCION_SCALAR_TO_COLOR,
-            [PRIM_TYPE_BOOL  ][PRIM_TYPE_VECTOR] = COERCION_SCALAR_TO_VECTOR,
-            [PRIM_TYPE_INT   ][PRIM_TYPE_VECTOR] = COERCION_SCALAR_TO_VECTOR,
-            [PRIM_TYPE_FLOAT ][PRIM_TYPE_VECTOR] = COERCION_SCALAR_TO_VECTOR,
-            [PRIM_TYPE_BOOL  ][PRIM_TYPE_POINT ] = COERCION_SCALAR_TO_POINT,
-            [PRIM_TYPE_INT   ][PRIM_TYPE_POINT ] = COERCION_SCALAR_TO_POINT,
-            [PRIM_TYPE_FLOAT ][PRIM_TYPE_POINT ] = COERCION_SCALAR_TO_POINT,
-            [PRIM_TYPE_BOOL  ][PRIM_TYPE_NORMAL] = COERCION_SCALAR_TO_NORMAL,
-            [PRIM_TYPE_INT   ][PRIM_TYPE_NORMAL] = COERCION_SCALAR_TO_NORMAL,
-            [PRIM_TYPE_FLOAT ][PRIM_TYPE_NORMAL] = COERCION_SCALAR_TO_NORMAL,
-            [PRIM_TYPE_COLOR ][PRIM_TYPE_VECTOR] = COERCION_COLOR_TO_VECTOR,
-            [PRIM_TYPE_COLOR ][PRIM_TYPE_POINT ] = COERCION_COLOR_TO_POINT,
-            [PRIM_TYPE_COLOR ][PRIM_TYPE_NORMAL] = COERCION_COLOR_TO_NORMAL,
-            [PRIM_TYPE_NORMAL][PRIM_TYPE_COLOR ] = COERCION_SPATIAL_TO_COLOR,
-            [PRIM_TYPE_POINT ][PRIM_TYPE_COLOR ] = COERCION_SPATIAL_TO_COLOR,
-            [PRIM_TYPE_VECTOR][PRIM_TYPE_COLOR ] = COERCION_SPATIAL_TO_COLOR,
-            [PRIM_TYPE_POINT ][PRIM_TYPE_VECTOR] = COERCION_SPATIAL_TO_VECTOR,
-            [PRIM_TYPE_NORMAL][PRIM_TYPE_VECTOR] = COERCION_SPATIAL_TO_VECTOR,
-            [PRIM_TYPE_VECTOR][PRIM_TYPE_NORMAL] = COERCION_SPATIAL_TO_NORMAL,
-            [PRIM_TYPE_POINT ][PRIM_TYPE_NORMAL] = COERCION_SPATIAL_TO_NORMAL,
-            [PRIM_TYPE_NORMAL][PRIM_TYPE_POINT ] = COERCION_SPATIAL_TO_POINT,
-            [PRIM_TYPE_VECTOR][PRIM_TYPE_POINT ] = COERCION_SPATIAL_TO_POINT,
-            [PRIM_TYPE_MATRIX][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
-            [PRIM_TYPE_NORMAL][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
-            [PRIM_TYPE_POINT ][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
-            [PRIM_TYPE_VECTOR][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
-            [PRIM_TYPE_COLOR ][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
-            [PRIM_TYPE_STRING][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
-            [PRIM_TYPE_FLOAT ][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
-            [PRIM_TYPE_INT   ][PRIM_TYPE_BOOL  ] = COERCION_TO_BOOL,
-            [PRIM_TYPE_INT   ][PRIM_TYPE_FLOAT ] = COERCION_TO_FLOAT,
-            [PRIM_TYPE_BOOL  ][PRIM_TYPE_FLOAT ] = COERCION_TO_FLOAT,
-            [PRIM_TYPE_BOOL  ][PRIM_TYPE_INT   ] = COERCION_TO_INT
-        };
-        return rank_matrix[from->prim_type][to_tag];
-    }
 
-    if (from->tag == TYPE_CLOSURE && to_tag == PRIM_TYPE_BOOL)
-        return COERCION_TO_BOOL;
+#define x(name, ...) \
+        [PRIM_TYPE_##name][PRIM_TYPE_##name] = COERCION_EXACT,
+        PRIM_TYPE_LIST(x)
+#undef x
+
+        [PRIM_TYPE_BOOL  ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
+        [PRIM_TYPE_INT   ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
+        [PRIM_TYPE_FLOAT ][PRIM_TYPE_MATRIX] = COERCION_SCALAR_TO_MATRIX,
+        [PRIM_TYPE_BOOL  ][PRIM_TYPE_COLOR ] = COERCION_SCALAR_TO_COLOR,
+        [PRIM_TYPE_INT   ][PRIM_TYPE_COLOR ] = COERCION_SCALAR_TO_COLOR,
+        [PRIM_TYPE_FLOAT ][PRIM_TYPE_COLOR ] = COERCION_SCALAR_TO_COLOR,
+        [PRIM_TYPE_BOOL  ][PRIM_TYPE_VECTOR] = COERCION_SCALAR_TO_VECTOR,
+        [PRIM_TYPE_INT   ][PRIM_TYPE_VECTOR] = COERCION_SCALAR_TO_VECTOR,
+        [PRIM_TYPE_FLOAT ][PRIM_TYPE_VECTOR] = COERCION_SCALAR_TO_VECTOR,
+        [PRIM_TYPE_BOOL  ][PRIM_TYPE_POINT ] = COERCION_SCALAR_TO_POINT,
+        [PRIM_TYPE_INT   ][PRIM_TYPE_POINT ] = COERCION_SCALAR_TO_POINT,
+        [PRIM_TYPE_FLOAT ][PRIM_TYPE_POINT ] = COERCION_SCALAR_TO_POINT,
+        [PRIM_TYPE_BOOL  ][PRIM_TYPE_NORMAL] = COERCION_SCALAR_TO_NORMAL,
+        [PRIM_TYPE_INT   ][PRIM_TYPE_NORMAL] = COERCION_SCALAR_TO_NORMAL,
+        [PRIM_TYPE_FLOAT ][PRIM_TYPE_NORMAL] = COERCION_SCALAR_TO_NORMAL,
+        [PRIM_TYPE_COLOR ][PRIM_TYPE_VECTOR] = COERCION_COLOR_TO_VECTOR,
+        [PRIM_TYPE_COLOR ][PRIM_TYPE_POINT ] = COERCION_COLOR_TO_POINT,
+        [PRIM_TYPE_COLOR ][PRIM_TYPE_NORMAL] = COERCION_COLOR_TO_NORMAL,
+        [PRIM_TYPE_NORMAL][PRIM_TYPE_COLOR ] = COERCION_SPATIAL_TO_COLOR,
+        [PRIM_TYPE_POINT ][PRIM_TYPE_COLOR ] = COERCION_SPATIAL_TO_COLOR,
+        [PRIM_TYPE_VECTOR][PRIM_TYPE_COLOR ] = COERCION_SPATIAL_TO_COLOR,
+        [PRIM_TYPE_POINT ][PRIM_TYPE_VECTOR] = COERCION_SPATIAL_TO_VECTOR,
+        [PRIM_TYPE_NORMAL][PRIM_TYPE_VECTOR] = COERCION_SPATIAL_TO_VECTOR,
+        [PRIM_TYPE_VECTOR][PRIM_TYPE_NORMAL] = COERCION_SPATIAL_TO_NORMAL,
+        [PRIM_TYPE_POINT ][PRIM_TYPE_NORMAL] = COERCION_SPATIAL_TO_NORMAL,
+        [PRIM_TYPE_NORMAL][PRIM_TYPE_POINT ] = COERCION_SPATIAL_TO_POINT,
+        [PRIM_TYPE_VECTOR][PRIM_TYPE_POINT ] = COERCION_SPATIAL_TO_POINT,
+        [PRIM_TYPE_MATRIX][PRIM_TYPE_BOOL  ] = COERCION_MATRIX_TO_BOOL,
+        [PRIM_TYPE_NORMAL][PRIM_TYPE_BOOL  ] = COERCION_TRIPLE_TO_BOOL,
+        [PRIM_TYPE_POINT ][PRIM_TYPE_BOOL  ] = COERCION_TRIPLE_TO_BOOL,
+        [PRIM_TYPE_VECTOR][PRIM_TYPE_BOOL  ] = COERCION_TRIPLE_TO_BOOL,
+        [PRIM_TYPE_COLOR ][PRIM_TYPE_BOOL  ] = COERCION_TRIPLE_TO_BOOL,
+        [PRIM_TYPE_STRING][PRIM_TYPE_BOOL  ] = COERCION_STRING_TO_BOOL,
+        [PRIM_TYPE_FLOAT ][PRIM_TYPE_BOOL  ] = COERCION_SCALAR_TO_BOOL,
+        [PRIM_TYPE_INT   ][PRIM_TYPE_BOOL  ] = COERCION_SCALAR_TO_BOOL,
+        [PRIM_TYPE_INT   ][PRIM_TYPE_FLOAT ] = COERCION_TO_FLOAT,
+        [PRIM_TYPE_BOOL  ][PRIM_TYPE_FLOAT ] = COERCION_TO_FLOAT,
+        [PRIM_TYPE_BOOL  ][PRIM_TYPE_INT   ] = COERCION_TO_INT
+    };
+    return coercion_rank_matrix[from][to];
+}
+
+static enum coercion_rank type_coercion_rank_to_prim_type(const struct type* from, enum prim_type to) {
+    if (to == PRIM_TYPE_VOID)
+        return COERCION_TO_VOID;
+
+    if (from->tag == TYPE_PRIM)
+        return prim_type_coercion_rank(from->prim_type, to);
+
+    if (from->tag == TYPE_CLOSURE && to == PRIM_TYPE_BOOL)
+        return COERCION_CLOSURE_TO_BOOL;
 
     if (from->tag == TYPE_COMPOUND) {
-        if (!prim_type_tag_is_triple(to_tag) && to_tag != PRIM_TYPE_MATRIX)
+        if (!prim_type_is_triple(to) && to != PRIM_TYPE_MATRIX)
             return COERCION_IMPOSSIBLE;
-        if (prim_type_tag_component_count(to_tag) != from->compound_type.elem_count)
+        if (prim_type_component_count(to) != from->compound_type.elem_count)
             return COERCION_IMPOSSIBLE;
         enum coercion_rank min_rank = COERCION_EXACT;
         for (size_t i = 0; i < from->compound_type.elem_count; ++i) {
-            enum coercion_rank rank = type_coercion_rank_prim(from->compound_type.elem_types[i], PRIM_TYPE_FLOAT);
+            enum coercion_rank rank = type_coercion_rank_to_prim_type(from->compound_type.elem_types[i], PRIM_TYPE_FLOAT);
             min_rank = min_rank < rank ? min_rank : rank;
         }
         return min_rank;
@@ -132,7 +149,7 @@ enum coercion_rank type_coercion_rank(const struct type* from, const struct type
         return COERCION_EXACT;
 
     if (to->tag == TYPE_PRIM)
-        return type_coercion_rank_prim(from, to->prim_type);
+        return type_coercion_rank_to_prim_type(from, to->prim_type);
 
     if (from->tag == TYPE_ARRAY && to->tag == TYPE_ARRAY &&
         from->array_type.elem_type == to->array_type.elem_type &&
@@ -188,16 +205,42 @@ bool type_is_unsized_array(const struct type* type) {
     return type->tag == TYPE_ARRAY && type->array_type.elem_count == 0;
 }
 
-bool type_is_prim_type(const struct type* type, enum prim_type_tag tag) {
-    return type->tag == TYPE_PRIM && type->prim_type == tag;
+bool type_is_prim_type(const struct type* type, enum prim_type prim_type) {
+    return type->tag == TYPE_PRIM && type->prim_type == prim_type;
 }
 
 bool type_is_void(const struct type* type) {
     return type_is_prim_type(type, PRIM_TYPE_VOID);
 }
 
+bool type_is_bool(const struct type* type) {
+    return type_is_prim_type(type, PRIM_TYPE_BOOL);
+}
+
+bool type_is_closure_color(const struct type* type) {
+    return
+        type->tag == TYPE_CLOSURE &&
+        type_is_prim_type(type->closure_type.inner_type, PRIM_TYPE_COLOR);
+}
+
+bool type_is_int(const struct type* type) {
+    return type_is_prim_type(type, PRIM_TYPE_INT);
+}
+
+bool type_is_string(const struct type* type) {
+    return type_is_prim_type(type, PRIM_TYPE_STRING);
+}
+
+bool type_is_matrix(const struct type* type) {
+    return type_is_prim_type(type, PRIM_TYPE_MATRIX);
+}
+
+bool type_is_scalar(const struct type* type) {
+    return type->tag == TYPE_PRIM && prim_type_is_scalar(type->prim_type);
+}
+
 bool type_is_triple(const struct type* type) {
-    return type->tag == TYPE_PRIM && prim_type_tag_is_triple(type->prim_type);
+    return type->tag == TYPE_PRIM && prim_type_is_triple(type->prim_type);
 }
 
 bool type_is_point_like(const struct type* type) {
@@ -226,7 +269,7 @@ bool type_is_castable_to(const struct type* from, const struct type* to) {
 }
 
 size_t type_component_count(const struct type* type) {
-    return type->tag == TYPE_PRIM ? prim_type_tag_component_count(type->prim_type) : 1;
+    return type->tag == TYPE_PRIM ? prim_type_component_count(type->prim_type) : 1;
 }
 
 const char* type_constructor_name(const struct type* type) {
@@ -254,10 +297,10 @@ static void print(FILE* file, const struct type* type, const struct styles* styl
             fprintf(file, "%s<error>%s", styles->error, styles->reset);
             break;
         case TYPE_PRIM:
-            fprintf(file, "%s%s%s", styles->keyword, prim_type_tag_to_string(type->prim_type), styles->reset);
+            fprintf(file, "%s%s%s", styles->keyword, prim_type_to_string(type->prim_type), styles->reset);
             break;
         case TYPE_SHADER:
-            fprintf(file, "%s%s%s", styles->keyword, shader_type_tag_to_string(type->shader_type), styles->reset);
+            fprintf(file, "%s%s%s", styles->keyword, shader_type_to_string(type->shader_type), styles->reset);
             break;
         case TYPE_CLOSURE:
             fprintf(file, "%sclosure%s ", styles->keyword, styles->reset);
@@ -311,6 +354,7 @@ void type_print(FILE* file, const struct type* type, const struct type_print_opt
     print(file, type, &styles);
 }
 
+// GCOV_EXCL_START
 void type_dump(const struct type* type) {
     type_print(stdout, type, &(struct type_print_options) {
         .disable_colors = !is_term(stdout)
@@ -318,6 +362,7 @@ void type_dump(const struct type* type) {
     fputs("\n", stdout);
     fflush(stdout);
 }
+// GCOV_EXCL_STOP
 
 char* type_to_string(const struct type* type, const struct type_print_options* options) {
     struct mem_stream mem_stream;
