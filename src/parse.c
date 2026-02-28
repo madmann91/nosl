@@ -834,6 +834,7 @@ static struct ast* parse_for_init(struct parser* parser) {
         case TOKEN_CLOSURE:
             return parse_var_decl(parser, parse_type(parser), true, false);
         case TOKEN_SEMICOLON:
+            eat_token(parser, TOKEN_SEMICOLON);
             return NULL;
         default:
             break;

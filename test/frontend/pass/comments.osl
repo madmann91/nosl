@@ -1,0 +1,6 @@
+// This comment contains invalid characters @ #
+/*
+    This comment also contains invalid characters
+    @ #
+*/
+shader test() {}

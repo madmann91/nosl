@@ -544,9 +544,12 @@ static void check_while_loop(struct type_checker* type_checker, struct ast* ast)
 
 static void check_for_loop(struct type_checker* type_checker, struct ast* ast) {
     env_push_scope(type_checker->env, ast);
-    check_stmt(type_checker, ast->for_loop.init);
-    check_cond(type_checker, ast->for_loop.cond);
-    check_expr(type_checker, ast->for_loop.inc, NULL);
+    if (ast->for_loop.init)
+        check_stmt(type_checker, ast->for_loop.init);
+    if (ast->for_loop.cond)
+        check_cond(type_checker, ast->for_loop.cond);
+    if (ast->for_loop.inc)
+        check_expr(type_checker, ast->for_loop.inc, NULL);
     check_stmt(type_checker, ast->for_loop.body);
     env_pop_scope(type_checker->env);
 }
@@ -963,6 +966,9 @@ static const struct type* check_binary_expr(
         return ast->type = type_table_make_error_type(type_checker->type_table);
 
     bool is_assign = binary_expr_tag_is_assign(ast->binary_expr.tag);
+    if (is_assign)
+        expect_mutable(type_checker, ast->binary_expr.args);
+
     if (are_all_prim_or_closure_type(ast->binary_expr.args)) {
         ast->type = check_builtin_binary_expr(type_checker, ast);
     } else {
@@ -977,8 +983,6 @@ static const struct type* check_binary_expr(
         ast->type = find_func_ret_type(symbol);
     }
 
-    if (is_assign)
-        expect_mutable(type_checker, ast->binary_expr.args);
     return coerce_expr(type_checker, ast, expected_type);
 }
 
@@ -986,9 +990,6 @@ static const struct type* check_builtin_unary_expr(
     struct type_checker* type_checker,
     struct ast* ast)
 {
-    if (unary_expr_tag_is_inc_or_dec(ast->unary_expr.tag))
-        expect_mutable(type_checker, ast->unary_expr.arg);
-
     const struct type* arg_type = ast->unary_expr.arg->type;
     switch (ast->unary_expr.tag) {
         case UNARY_EXPR_NEG:
@@ -1030,10 +1031,15 @@ static const struct type* check_unary_expr(
     if (!check_call_args(type_checker, ast->unary_expr.arg))
         return ast->type = type_table_make_error_type(type_checker->type_table);
 
+    bool is_inc_or_dec = unary_expr_tag_is_inc_or_dec(ast->unary_expr.tag);
+    if (is_inc_or_dec)
+        expect_mutable(type_checker, ast->unary_expr.arg);
+
     if (are_all_prim_or_closure_type(ast->unary_expr.arg)) {
         ast->type = check_builtin_unary_expr(type_checker, ast);
     } else {
         const char* func_name = unary_expr_tag_to_func_name(ast->unary_expr.tag);
+        const struct type* ret_type = is_inc_or_dec ? ast->unary_expr.arg->type : expected_type;
 
         // Add dummy `1` argument for increment (resp. decrement) operators, which use a binary `+`
         // (resp. `-`) under the hood.
@@ -1043,14 +1049,15 @@ static const struct type* check_unary_expr(
             .loc = ast->loc,
             .int_literal = 1
         };
-        const struct type* ret_type = expected_type;
-        if (unary_expr_tag_is_inc_or_dec(ast->unary_expr.tag)) {
-            expect_mutable(type_checker, ast->unary_expr.arg);
-            ret_type = ast->unary_expr.arg->type;
+        if (is_inc_or_dec)
             ast->unary_expr.arg->next = &one;
-        }
 
         struct ast* symbol = find_func_or_struct_with_name(type_checker, &ast->loc, func_name, ret_type, ast->unary_expr.arg);
+
+        // Remove dummy `1`, if we added one previously.
+        if (is_inc_or_dec)
+            ast->unary_expr.arg->next = NULL;
+
         if (!symbol || symbol->tag == AST_STRUCT_DECL)
             return ast->type = type_table_make_error_type(type_checker->type_table);
 

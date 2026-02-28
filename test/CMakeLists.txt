@@ -63,6 +63,7 @@ string s5 = \"A B\";")
 
 # Frontend Tests ----------------------------------------------------------------------------------
 
+add_nosl_test(LABELS frontend FILE "frontend/pass/comments.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/strings.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/functions.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/types.osl")
@@ -84,6 +85,7 @@ add_nosl_test(LABELS frontend FILE "frontend/pass/builtin_operators.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/overloaded_operators.osl")
 add_nosl_test(LABELS frontend FILE "frontend/pass/loops.osl")
 
+add_nosl_test(LABELS frontend FILE "frontend/fail/unterminated_comment.osl"     REGEX "unterminated multi-line comment")
 add_nosl_test(LABELS frontend FILE "frontend/fail/missing_default_value.osl"    REGEX "expected '='")
 add_nosl_test(LABELS frontend FILE "frontend/fail/invalid_break.osl"            REGEX "'break' is not allowed outside of loops")
 add_nosl_test(LABELS frontend FILE "frontend/fail/invalid_continue.osl"         REGEX "'continue' is not allowed outside of loops")

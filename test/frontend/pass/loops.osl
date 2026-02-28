@@ -9,4 +9,9 @@ shader foo() {
     do {
         continue;
     } while (false);
+    for (;;)
+        break;
+    int i;
+    for (i = 0; i < 3; ++i)
+        continue;
 }
