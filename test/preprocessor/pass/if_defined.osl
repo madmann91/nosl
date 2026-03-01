@@ -2,7 +2,7 @@
 #if defined(X)
 #error "X is not defined"
 #endif
-#if defined(Y)
+#if defined Y
 #else
 #error "Y is defined"
 #endif

@@ -656,9 +656,10 @@ static inline int parse_condition(struct preprocessor* preprocessor) {
             return 0;
         case TOKEN_IDENT:
             if (str_view_is_equal(&token.contents, &STR_VIEW("defined"))) {
-                expect_token(preprocessor, TOKEN_LPAREN);
+                bool has_paren = accept_token(preprocessor, TOKEN_LPAREN);
                 const char* ident = parse_ident(preprocessor);
-                expect_token(preprocessor, TOKEN_RPAREN);
+                if (has_paren)
+                    expect_token(preprocessor, TOKEN_RPAREN);
                 return find_macro(preprocessor, ident) ? 1 : 0;
             }
             return 0;
