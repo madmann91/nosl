@@ -103,7 +103,7 @@ add_nosl_test(LABELS frontend FILE "frontend/fail/assign_value.osl"             
 add_nosl_test(LABELS frontend FILE "frontend/fail/unknown_array_size.osl"       REGEX "array dimension must be constant and strictly positive")
 add_nosl_test(LABELS frontend FILE "frontend/fail/negative_array_size.osl"      REGEX "array dimension must be constant and strictly positive")
 add_nosl_test(LABELS frontend FILE "frontend/fail/missing_function_body.osl"    REGEX "missing function body")
-add_nosl_test(LABELS frontend FILE "frontend/fail/missing_return_value.osl"     REGEX "missing return value")
+add_nosl_test(LABELS frontend FILE "frontend/fail/missing_return_value.osl"     REGEX "function 'foo' must return a value of type 'int'")
 add_nosl_test(LABELS frontend FILE "frontend/fail/overloaded_identifier.osl"    REGEX "cannot resolve overloaded identifier 'foo'")
 add_nosl_test(LABELS frontend FILE "frontend/fail/overload_variable.osl"        REGEX "redefinition for symbol 'foo'")
 add_nosl_test(LABELS frontend FILE "frontend/fail/function_as_value.osl"        REGEX "cannot use function 'foo' as value")

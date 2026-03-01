@@ -505,7 +505,10 @@ static void check_return_stmt(struct type_checker* type_checker, struct ast* ast
         else
             check_expr(type_checker, ast->return_stmt.value, ret_type);
     } else if (ret_type->tag != TYPE_SHADER && !type_is_void(ret_type)) {
-        log_error(type_checker->log, &ast->loc, "missing return value");
+        char* ret_type_string = type_to_string(ret_type, &type_checker->type_print_options);
+        log_error(type_checker->log, &ast->loc, "function '%s' must return a value of type '%s'",
+            ast_decl_name(shader_or_func), ret_type_string);
+        free(ret_type_string);
     }
 
     ast->return_stmt.shader_or_func = shader_or_func;
