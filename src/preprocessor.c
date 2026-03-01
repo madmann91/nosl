@@ -632,12 +632,6 @@ void preprocessor_close(struct preprocessor* preprocessor) {
     free(preprocessor);
 }
 
-static inline int parse_literal(struct preprocessor* preprocessor) {
-    int int_literal = peek_token(preprocessor).int_literal;
-    eat_token(preprocessor, TOKEN_INT_LITERAL);
-    return int_literal;
-}
-
 static inline void report_error(struct preprocessor* preprocessor, const char* msg) {
     struct token token = read_token(preprocessor);
     log_error(preprocessor->log, &token.loc,
@@ -645,19 +639,33 @@ static inline void report_error(struct preprocessor* preprocessor, const char* m
         msg, (int)token.contents.length, token.contents.data);
 }
 
-static inline int parse_condition(struct preprocessor* preprocessor) {
-    switch (peek_token(preprocessor).tag) {
-        case TOKEN_INT_LITERAL: return parse_literal(preprocessor);
-        default:
-            report_error(preprocessor, "condition");
-            return 0;
-    }
-}
-
 static const char* parse_ident(struct preprocessor* preprocessor) {
     const char* ident = str_pool_insert_view(preprocessor->str_pool, peek_token(preprocessor).contents);
     expect_token(preprocessor, TOKEN_IDENT);
     return ident;
+}
+
+static inline int parse_condition(struct preprocessor* preprocessor) {
+    struct token token = expand_token(preprocessor);
+    switch (token.tag) {
+        case TOKEN_INT_LITERAL:
+            return token.int_literal;
+        case TOKEN_TRUE:
+            return 1;
+        case TOKEN_FALSE:
+            return 0;
+        case TOKEN_IDENT:
+            if (str_view_is_equal(&token.contents, &STR_VIEW("defined"))) {
+                expect_token(preprocessor, TOKEN_LPAREN);
+                const char* ident = parse_ident(preprocessor);
+                expect_token(preprocessor, TOKEN_RPAREN);
+                return find_macro(preprocessor, ident) ? 1 : 0;
+            }
+            return 0;
+        default:
+            report_error(preprocessor, "condition");
+            return 0;
+    }
 }
 
 static inline bool eval_cond(struct preprocessor* preprocessor, enum cond_value cond_value) {
@@ -818,6 +826,10 @@ static inline size_t find_macro_param_index(
 }
 
 static bool verify_macro(struct preprocessor* preprocessor, const struct macro* macro) {
+    if (!strcmp(macro->name, "defined")) {
+        log_error(preprocessor->log, &macro->loc, "'defined' cannot be used as a macro name");
+        return false;
+    }
     for (size_t i = 0; i < macro->tokens.elem_count; ++i) {
         switch (macro->tokens.elems[i].tag) {
             case TOKEN_HASH:

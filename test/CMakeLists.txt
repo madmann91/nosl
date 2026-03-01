@@ -39,6 +39,7 @@ add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/bad_macro_ellipsis.osl
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/bad_va_args.osl"          REGEX "'__VA_ARGS__' is only allowed inside variadic macros" ARGS --warns-as-errors)
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/too_many_args.osl"        REGEX "expected 1 argument\\(s\\) to macro 'TEST', but got 2")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/invalid_stringify.osl"    REGEX "stringification operator '#' must be followed by a macro parameter")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/define_defined.osl"       REGEX "'defined' cannot be used as a macro name")
 
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/if_elif_else.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/warning.osl")
@@ -52,6 +53,7 @@ add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/variadic_macros.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/ignore_va_args.osl")
 
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/concat.osl")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/if_defined.osl")
 
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/stringify.osl" ARGS --print-ast REGEX
     REGEX ".*\

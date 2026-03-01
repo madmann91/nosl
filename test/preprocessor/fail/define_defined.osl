@@ -1,0 +1,2 @@
+#define defined(x) 0
+shader test() {}
