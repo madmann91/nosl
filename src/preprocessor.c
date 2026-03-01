@@ -1,12 +1,13 @@
 #include "preprocessor.h"
+#include "file_cache.h"
 #include "lexer.h"
 
+#include <overture/file.h>
 #include <overture/hash.h>
 #include <overture/mem.h>
 #include <overture/str_pool.h>
 #include <overture/mem_pool.h>
 #include <overture/set.h>
-#include <overture/file.h>
 
 #include <string.h>
 #include <assert.h>
@@ -76,7 +77,6 @@ enum context_tag {
 
 struct source_file {
     const char* file_name;
-    char* file_data;
     struct lexer lexer;
     struct cond_stack cond_stack;
 };
@@ -125,6 +125,7 @@ struct preprocessor {
     struct macro_set macros;
     struct str_pool* str_pool;
     struct mem_pool mem_pool;
+    struct file_cache* file_cache;
     struct cond_stack cond_stack;
     size_t inactive_cond_depth;
 };
@@ -195,19 +196,19 @@ static inline void finalize_context(struct context* context) {
         advance_context(context);
 }
 
-static inline struct context* open_source_file_context(struct context* prev, const char* file_name) {
-    size_t file_size = 0;
-    char* file_data = read_file(file_name, &file_size);
-    if (!file_data)
+static inline struct context* open_source_file_context(
+    struct file_cache* file_cache,
+    struct context* prev,
+    const char* file_name)
+{
+    const struct cached_file* cached_file = file_cache_read(file_cache, file_name);
+    if (!cached_file)
         return NULL;
 
     struct context* context = alloc_context(prev, CONTEXT_SOURCE_FILE);
     context->source_file.file_name = file_name;
-    context->source_file.file_data = file_data;
     context->source_file.cond_stack.conds = cond_vec_create();
-    context->source_file.lexer = lexer_create(
-        STR_VIEW(file_name),
-        (struct str_view) { .data = file_data, .length = file_size });
+    context->source_file.lexer = lexer_create(file_name, cached_file->file_data);
     finalize_context(context);
     return context;
 }
@@ -227,7 +228,6 @@ static inline struct context* alloc_expanded_macro_context(struct context* prev,
 
 static inline void free_context(struct context* context) {
     if (context->tag == CONTEXT_SOURCE_FILE) {
-        free(context->source_file.file_data);
         cond_vec_destroy(&context->source_file.cond_stack.conds);
     } else if (context->tag == CONTEXT_TOKEN_BUFFER) {
         token_vec_destroy(&context->token_buffer.tokens);
@@ -597,16 +597,18 @@ static void register_standard_macros(struct preprocessor* preprocessor) {
 
 struct preprocessor* preprocessor_open(
     struct log* log,
+    struct file_cache* file_cache,
     const char* file_name,
     const char* const* include_paths)
 {
-    struct context* context = open_source_file_context(NULL, file_name);
+    struct context* context = open_source_file_context(file_cache, NULL, file_name);
     if (!context)
         return NULL;
 
     struct preprocessor* preprocessor = xmalloc(sizeof(struct preprocessor));
     preprocessor->log = log;
     preprocessor->context = NULL;
+    preprocessor->file_cache = file_cache;
     preprocessor->include_paths = include_paths;
     preprocessor->macros = macro_set_create();
     preprocessor->mem_pool = mem_pool_create();
@@ -1020,7 +1022,10 @@ static struct context* open_include_file_context(
     struct context* context = NULL;
     if (find_include_file_name(preprocessor, include_file_name, is_relative_include, &full_path)) {
         context = open_source_file_context(
-            preprocessor->context, str_pool_insert(preprocessor->str_pool, full_path.data));
+            preprocessor->file_cache,
+            preprocessor->context,
+            str_pool_insert(preprocessor->str_pool, full_path.data));
+        assert(context);
     }
     str_destroy(&full_path);
     return context;
@@ -1161,10 +1166,10 @@ void preprocessor_register_macro(struct preprocessor* preprocessor, const char* 
         .has_params = false,
         .is_variadic = false,
         .param_count = 0,
-        .loc = { .file_name = STR_VIEW("<builtin macro>") }
+        .loc = { .file_name = "<builtin macro>" }
     };
 
-    struct lexer lexer = lexer_create(STR_VIEW(name), STR_VIEW(expansion));
+    struct lexer lexer = lexer_create(name, STR_VIEW(expansion));
     while (true) {
         struct token token = lexer_advance(&lexer);
         if (token.tag == TOKEN_EOF)

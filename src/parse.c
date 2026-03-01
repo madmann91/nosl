@@ -77,7 +77,7 @@ static inline struct ast* alloc_ast(
     struct file_loc* end_loc = &parser->behind->loc;
     const bool is_after = end_loc->end.row > begin_loc->begin.row ||
         (end_loc->end.row == begin_loc->begin.row && end_loc->end.col >= begin_loc->begin.col);
-    const bool is_same_file = str_view_is_equal(&end_loc->file_name, &begin_loc->file_name);
+    const bool is_same_file = !strcmp(end_loc->file_name, begin_loc->file_name);
 
     copy->loc.file_name = begin_loc->file_name;
     copy->loc.begin = begin_loc->begin;

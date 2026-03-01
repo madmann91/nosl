@@ -4,7 +4,7 @@
 #include <ctype.h>
 #include <inttypes.h>
 
-struct lexer lexer_create(struct str_view file_name, struct str_view file_data) {
+struct lexer lexer_create(const char* file_name, struct str_view file_data) {
     return (struct lexer) {
         .file_name = file_name,
         .file_data = file_data,

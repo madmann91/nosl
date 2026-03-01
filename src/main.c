@@ -1,12 +1,12 @@
 #include "parse.h"
 #include "check.h"
 #include "type_table.h"
+#include "file_cache.h"
 #include "preprocessor.h"
 #include "lexer.h"
 #include "ast.h"
 
 #include <overture/cli.h>
-#include <overture/file.h>
 #include <overture/mem_pool.h>
 #include <overture/log.h>
 #include <overture/term.h>
@@ -125,21 +125,39 @@ static void register_user_macros(struct preprocessor* preprocessor, const struct
     }
 }
 
+static struct str_view read_line(void* data, const char* file_name, uint32_t line) {
+    struct file_cache* file_cache = data;
+    const struct cached_file* cached_file = file_cache_read(file_cache, file_name);
+    if (!cached_file)
+        return (struct str_view) {};
+    if (line == 0 || line > cached_file->line_count)
+        return (struct str_view) {};
+    return cached_file->lines[line - 1];
+}
+
 static bool compile_file(
     const char* file_name,
     struct ast* builtins,
+    struct file_cache* file_cache,
     struct type_table* type_table,
     const struct options* options)
 {
+    struct line_reader line_reader = {
+        .read_line = read_line,
+        .data = file_cache
+    };
+
     struct log log = {
         .file = stderr,
         .disable_colors = options->disable_colors || !is_term(stderr),
         .warns_as_errors = options->warns_as_errors,
         .max_warns = options->max_warns,
-        .max_errors = options->max_errors
+        .max_errors = options->max_errors,
+        .line_reader = &line_reader
     };
 
-    struct preprocessor* preprocessor = preprocessor_open(&log, file_name, (const char* const*)options->include_dirs.elems);
+    struct preprocessor* preprocessor = preprocessor_open(
+        &log, file_cache, file_name, (const char* const*)options->include_dirs.elems);
     if (!preprocessor) {
         log_error(&log, NULL, "cannot open '%s'\n", file_name);
         return false;
@@ -215,7 +233,7 @@ static struct ast* parse_builtins(
         , 0
     };
 
-    struct lexer lexer = lexer_create(STR_VIEW("builtins.osl"), STR_VIEW(builtins_data));
+    struct lexer lexer = lexer_create("builtins.osl", STR_VIEW(builtins_data));
     struct ast* builtins = parse_with_lexer(mem_pool, &lexer, &log);
     check(mem_pool, type_table, builtins, &log);
     assert(log.error_count == 0 && log.warn_count == 0);
@@ -234,6 +252,7 @@ int main(int argc, char** argv) {
 
     struct mem_pool mem_pool = mem_pool_create();
     struct type_table* type_table = type_table_create(&mem_pool);
+    struct file_cache* file_cache = file_cache_create();
 
     struct ast* builtins = NULL;
     if (!options.disable_builtins)
@@ -244,10 +263,11 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (!argv[i])
             continue;
-        status &= compile_file(argv[i], builtins, type_table, &options);
+        status &= compile_file(argv[i], builtins, file_cache, type_table, &options);
         file_count++;
     }
 
+    file_cache_destroy(file_cache);
     type_table_destroy(type_table);
     mem_pool_destroy(&mem_pool);
     options_destroy(&options);

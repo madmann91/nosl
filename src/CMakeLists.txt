@@ -5,6 +5,7 @@ add_library(libnosl
     ast.c
     type.c
     type_table.c
+    file_cache.c
     env.c
     check.c
     preprocessor.c)

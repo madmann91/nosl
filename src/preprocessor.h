@@ -4,9 +4,11 @@
 
 struct log;
 struct preprocessor;
+struct file_cache;
 
 [[nodiscard]] struct preprocessor* preprocessor_open(
     struct log*,
+    struct file_cache*,
     const char* file_name,
     const char* const* include_paths);
 
