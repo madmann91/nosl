@@ -167,21 +167,22 @@ static bool compile_file(
     register_user_macros(preprocessor, options);
 
     struct mem_pool mem_pool = mem_pool_create();
-    struct ast* program = parse_with_preprocessor(&mem_pool, preprocessor, &log);
+    struct ast* first_decl = parse_with_preprocessor(&mem_pool, preprocessor, &log);
 
     // If builtins are available, prepend them to the program.
     struct ast* last_builtin = NULL;
+    struct ast* full_program = first_decl;
     if (builtins) {
         last_builtin = ast_list_last(builtins);
-        last_builtin->next = program;
-        program = builtins;
+        last_builtin->next = first_decl;
+        full_program = builtins;
     }
 
-    if (program) {
-        check(&mem_pool, type_table, program, &log);
+    if (full_program) {
+        check(&mem_pool, type_table, full_program, &log);
 
         if (options->print_ast) {
-            ast_print(stdout, program, &(struct ast_print_options) {
+            ast_print(stdout, first_decl, &(struct ast_print_options) {
                 .disable_colors = options->disable_colors || !is_term(stdout)
             });
         }
