@@ -5,12 +5,12 @@ remains completely compatible with the standard OSL implementation.
 
 ## Status
 
-- [-] Preprocessor
+- [ ] Preprocessor
     - Preprocessor expressions are missing
     - `#line` and `#pragma once` support is missing
     - `__LINE__`, `__FILE__` are missing
 - [X] Parser
-- [-] Type-checker
+- [ ] Type-checker
     - Texture-related built-in functions are missing
     - Noise-related built-in functions are missing
 - [ ] Backend
