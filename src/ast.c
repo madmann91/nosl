@@ -127,6 +127,43 @@ bool func_name_is_operator(const char* func_name) {
     return !strncmp(func_name, operator_prefix, strlen(operator_prefix));
 }
 
+enum binary_expr_tag token_tag_to_binary_expr_tag(enum token_tag tag) {
+    switch (tag) {
+#define x(name, tok, ...) case TOKEN_##tok: return BINARY_EXPR_##name;
+        BINARY_EXPR_LIST(x)
+#undef x
+        default:
+            return BINARY_EXPR_INVALID;
+    }
+}
+
+enum unary_expr_tag token_tag_to_unary_expr_tag(enum token_tag tag, bool is_prefix) {
+    switch (tag) {
+        case TOKEN_TILDE: return UNARY_EXPR_BIT_NOT;
+        case TOKEN_NOT:   return UNARY_EXPR_NOT;
+        case TOKEN_SUB:   return UNARY_EXPR_NEG;
+        case TOKEN_INC:   return is_prefix ? UNARY_EXPR_PRE_INC : UNARY_EXPR_POST_INC;
+        case TOKEN_DEC:   return is_prefix ? UNARY_EXPR_PRE_DEC : UNARY_EXPR_POST_DEC;
+        case TOKEN_ADD:   return UNARY_EXPR_PLUS;
+        default:          return UNARY_EXPR_INVALID;
+    }
+}
+
+int binary_expr_max_precedence(bool include_assign) {
+    int max_prec = 0;
+#define x(name, tok, str, prec) max_prec = max_prec < prec ? prec : max_prec;
+    ARITH_EXPR_LIST(x)
+    SHIFT_EXPR_LIST(x)
+    CMP_EXPR_LIST(x)
+    BIT_EXPR_LIST(x)
+    LOGIC_EXPR_LIST(x)
+    if (include_assign) {
+        ASSIGN_EXPR_LIST(x)
+    }
+#undef x
+    return max_prec;
+}
+
 enum binary_expr_tag binary_expr_tag_remove_assign(enum binary_expr_tag tag) {
     switch (tag) {
         case BINARY_EXPR_ASSIGN_MUL:     return BINARY_EXPR_MUL;

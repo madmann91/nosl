@@ -1,0 +1,4 @@
+#define CAT(x, y) x ## y
+shader test() {
+    int i = CAT(1, s);
+}

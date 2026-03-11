@@ -311,18 +311,10 @@ static struct ast* parse_primary_expr(struct parser* parser) {
 
 static struct ast* parse_pre_unary_expr(struct parser* parser) {
     struct file_loc begin_loc = parser->ahead->loc;
-    enum unary_expr_tag tag = UNARY_EXPR_NOT;
-    switch (parser->ahead->tag) {
-        case TOKEN_TILDE: tag = UNARY_EXPR_BIT_NOT; break;
-        case TOKEN_NOT:   tag = UNARY_EXPR_NOT;     break;
-        case TOKEN_SUB:   tag = UNARY_EXPR_NEG;     break;
-        case TOKEN_INC:   tag = UNARY_EXPR_PRE_INC; break;
-        case TOKEN_DEC:   tag = UNARY_EXPR_PRE_DEC; break;
-        default:
-            assert(false && "invalid prefix unary operation");
-            break;
-    }
+    enum unary_expr_tag tag = token_tag_to_unary_expr_tag(parser->ahead->tag, true);
+    assert(tag != UNARY_EXPR_INVALID && "invalid prefix unary operation");
     read_token(parser);
+
     struct ast* arg = parse_expr(parser);
     return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_UNARY_EXPR,
@@ -413,17 +405,9 @@ static struct ast* parse_suffix_expr(struct parser* parser) {
 
 static struct ast* parse_binary_expr(struct parser* parser, struct ast* left, int prec) {
     while (true) {
-        enum binary_expr_tag tag;
-        switch (parser->ahead->tag) {
-#define x(name, tok, ...) case TOKEN_##tok: tag = BINARY_EXPR_##name; break;
-            ARITH_EXPR_LIST(x)
-            SHIFT_EXPR_LIST(x)
-            CMP_EXPR_LIST(x)
-            BIT_EXPR_LIST(x)
-            LOGIC_EXPR_LIST(x)
-#undef x
-            default: return left;
-        }
+        enum binary_expr_tag tag = token_tag_to_binary_expr_tag(parser->ahead->tag);
+        if (tag == BINARY_EXPR_INVALID || binary_expr_tag_is_assign(tag))
+            return left;
 
         int next_prec = binary_expr_tag_precedence(tag);
         if (next_prec < prec) {
@@ -445,20 +429,8 @@ static struct ast* parse_binary_expr(struct parser* parser, struct ast* left, in
     return parse_suffix_expr(parser);
 }
 
-static inline int max_precedence() {
-    int max_prec = 0;
-#define x(name, tok, str, prec) max_prec = max_prec < prec ? prec : max_prec;
-    ARITH_EXPR_LIST(x)
-    SHIFT_EXPR_LIST(x)
-    CMP_EXPR_LIST(x)
-    BIT_EXPR_LIST(x)
-    LOGIC_EXPR_LIST(x)
-#undef x
-    return max_prec;
-}
-
 static struct ast* parse_ternary_expr(struct parser* parser) {
-    struct ast* cond = parse_binary_expr(parser, parse_suffix_expr(parser), max_precedence());
+    struct ast* cond = parse_binary_expr(parser, parse_suffix_expr(parser), binary_expr_max_precedence(false));
     if (!accept_token(parser, TOKEN_QUESTION))
         return cond;
 

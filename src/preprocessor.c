@@ -1,6 +1,7 @@
 #include "preprocessor.h"
 #include "file_cache.h"
 #include "lexer.h"
+#include "ast.h"
 
 #include <overture/file.h>
 #include <overture/hash.h>
@@ -132,6 +133,9 @@ struct preprocessor {
 
 SMALL_VEC_DEFINE(small_str_view_vec, struct str_view, PRIVATE)
 SMALL_VEC_DEFINE(small_index_vec, size_t, PRIVATE)
+
+static struct token expand_token(struct preprocessor*);
+static int parse_cond(struct preprocessor*, bool);
 
 static inline void cleanup_macro(struct macro* macro) {
     token_vec_destroy(&macro->tokens);
@@ -328,8 +332,6 @@ static inline void macro_arg_destroy(struct macro_arg* macro_arg) {
     token_vec_destroy(&macro_arg->unexpanded_tokens);
     memset(macro_arg, 0, sizeof(struct macro_arg));
 }
-
-static inline struct token expand_token(struct preprocessor*);
 
 static const struct token_vec* expand_macro_arg(struct preprocessor* preprocessor, struct macro_arg* macro_arg) {
     if (macro_arg->is_expanded)
@@ -533,7 +535,7 @@ static inline struct context* expand_macro(
     return context;
 }
 
-static inline struct token expand_token(struct preprocessor* preprocessor) {
+static struct token expand_token(struct preprocessor* preprocessor) {
     while (true) {
         struct token token = read_token(preprocessor);
         if (token.tag != TOKEN_IDENT || !preprocessor->context->is_active)
@@ -632,20 +634,13 @@ void preprocessor_close(struct preprocessor* preprocessor) {
     free(preprocessor);
 }
 
-static inline void report_error(struct preprocessor* preprocessor, const char* msg) {
-    struct token token = read_token(preprocessor);
-    log_error(preprocessor->log, &token.loc,
-        "expected %s, but got '%.*s'",
-        msg, (int)token.contents.length, token.contents.data);
-}
-
 static const char* parse_ident(struct preprocessor* preprocessor) {
     const char* ident = str_pool_insert_view(preprocessor->str_pool, peek_token(preprocessor).contents);
     expect_token(preprocessor, TOKEN_IDENT);
     return ident;
 }
 
-static inline int parse_condition(struct preprocessor* preprocessor) {
+static int parse_primary_cond(struct preprocessor* preprocessor, bool should_eval) {
     struct token token = expand_token(preprocessor);
     switch (token.tag) {
         case TOKEN_INT_LITERAL:
@@ -654,25 +649,132 @@ static inline int parse_condition(struct preprocessor* preprocessor) {
             return 1;
         case TOKEN_FALSE:
             return 0;
+        case TOKEN_LPAREN: {
+            int cond = parse_cond(preprocessor, should_eval);
+            expect_token(preprocessor, TOKEN_RPAREN);
+            return cond;
+        }
         case TOKEN_IDENT:
             if (str_view_is_equal(&token.contents, &STR_VIEW("defined"))) {
                 bool has_paren = accept_token(preprocessor, TOKEN_LPAREN);
                 const char* ident = parse_ident(preprocessor);
                 if (has_paren)
                     expect_token(preprocessor, TOKEN_RPAREN);
-                return find_macro(preprocessor, ident) ? 1 : 0;
+                return should_eval && find_macro(preprocessor, ident) ? 1 : 0;
             }
             return 0;
         default:
-            report_error(preprocessor, "condition");
+            log_error(preprocessor->log, &token.loc,
+                "expected condition, but got '%.*s'",
+                (int)token.contents.length, token.contents.data);
             return 0;
     }
+}
+
+static int parse_prefix_cond(struct preprocessor* preprocessor, bool should_eval) {
+    enum unary_expr_tag tag = token_tag_to_unary_expr_tag(peek_token(preprocessor).tag, true);
+    if (unary_expr_tag_is_inc_or_dec(tag))
+        tag = UNARY_EXPR_INVALID;
+    if (tag == UNARY_EXPR_INVALID)
+        return parse_primary_cond(preprocessor, should_eval);
+
+    read_token(preprocessor);
+    int cond = parse_prefix_cond(preprocessor, should_eval);
+    if (should_eval) {
+        switch (tag) {
+            case UNARY_EXPR_INVALID:
+                [[fallthrough]];
+            case UNARY_EXPR_PLUS:     return cond;
+            case UNARY_EXPR_NOT:      return !cond;
+            case UNARY_EXPR_BIT_NOT:  return ~cond;
+            case UNARY_EXPR_NEG:      return -cond;
+            default:
+                assert(false && "invalid unary expression");
+                break;
+        }
+    }
+    return cond;
+}
+
+static inline int parse_binary_cond(struct preprocessor* preprocessor, int left, int prec, bool should_eval) {
+    while (true) {
+        struct token token = peek_token(preprocessor);
+        enum binary_expr_tag tag = token_tag_to_binary_expr_tag(token.tag);
+        if (tag == BINARY_EXPR_INVALID || binary_expr_tag_is_assign(tag))
+            return left;
+
+        int next_prec = binary_expr_tag_precedence(tag);
+        if (next_prec < prec) {
+            left = parse_binary_cond(preprocessor, left, next_prec, should_eval);
+        } else if (next_prec > prec) {
+            return left;
+        } else {
+            read_token(preprocessor);
+
+            bool should_eval_right = should_eval;
+            if (left == 0 && tag == BINARY_EXPR_LOGIC_AND)
+                should_eval_right = false;
+            else if (left != 0 && tag == BINARY_EXPR_LOGIC_OR)
+                should_eval_right = false;
+
+            int right = parse_binary_cond(preprocessor, parse_prefix_cond(preprocessor, should_eval_right), prec - 1, should_eval_right);
+            if (should_eval) {
+                switch (tag) {
+                    case BINARY_EXPR_MUL:       left = left *  right; break;
+                    case BINARY_EXPR_ADD:       left = left +  right; break;
+                    case BINARY_EXPR_SUB:       left = left -  right; break;
+                    case BINARY_EXPR_LSHIFT:    left = left << right; break;
+                    case BINARY_EXPR_RSHIFT:    left = left >> right; break;
+                    case BINARY_EXPR_CMP_LT:    left = left <  right; break;
+                    case BINARY_EXPR_CMP_LE:    left = left <= right; break;
+                    case BINARY_EXPR_CMP_GT:    left = left >  right; break;
+                    case BINARY_EXPR_CMP_GE:    left = left >= right; break;
+                    case BINARY_EXPR_CMP_NE:    left = left != right; break;
+                    case BINARY_EXPR_CMP_EQ:    left = left == right; break;
+                    case BINARY_EXPR_BIT_AND:   left = left &  right; break;
+                    case BINARY_EXPR_BIT_XOR:   left = left ^  right; break;
+                    case BINARY_EXPR_BIT_OR:    left = left |  right; break;
+                    case BINARY_EXPR_LOGIC_AND: left = left && right; break;
+                    case BINARY_EXPR_LOGIC_OR:  left = left || right; break;
+
+                    case BINARY_EXPR_DIV:
+                    case BINARY_EXPR_REM:
+                        if (right == 0) {
+                            log_error(preprocessor->log, &token.loc, "division by zero while evaluating condition");
+                            right = 1;
+                        }
+                        left = tag == BINARY_EXPR_DIV ? left / right : left % right;
+                        break;
+
+                    default:
+                        assert(false && "invalid binary expression");
+                        break;
+                }
+            }
+        }
+    }
+    return left;
+}
+
+static int parse_ternary_cond(struct preprocessor* preprocessor, bool should_eval) {
+    int cond = parse_binary_cond(preprocessor, parse_prefix_cond(preprocessor, should_eval), binary_expr_max_precedence(false), should_eval);
+    if (!accept_token(preprocessor, TOKEN_QUESTION))
+        return cond;
+
+    int then_val = parse_cond(preprocessor, should_eval && cond != 0);
+    expect_token(preprocessor, TOKEN_COLON);
+    int else_val = parse_cond(preprocessor, should_eval && cond == 0);
+    return cond ? then_val : else_val;
+}
+
+static int parse_cond(struct preprocessor* preprocessor, bool should_eval) {
+    return parse_ternary_cond(preprocessor, should_eval);
 }
 
 static inline bool eval_cond(struct preprocessor* preprocessor, enum cond_value cond_value) {
     switch (cond_value) {
         case COND_PARSE:
-            return parse_condition(preprocessor) != 0;
+            return parse_cond(preprocessor, true) != 0;
         case COND_IS_DEFINED:
         case COND_IS_NOT_DEFINED:
         {

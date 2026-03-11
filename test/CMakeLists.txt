@@ -26,20 +26,39 @@ set_tests_properties(no_input_file PROPERTIES PASS_REGULAR_EXPRESSION "no input 
 
 # Preprocessor Tests ------------------------------------------------------------------------------
 
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/double_else.osl"          REGEX "'#else' after '#else'")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/undef.osl"                REGEX "unknown macro")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/missing_include.osl"      REGEX "cannot find include file")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_if_0.osl"    REGEX "unterminated '#if'")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_if_1.osl"    REGEX "unterminated '#if'")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_if_if_0.osl" REGEX "unterminated '#if'")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/macro_redefinition.osl"   REGEX "redefinition for macro 'FOO'" ARGS --warns-as-errors)
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/error.osl"                REGEX "This should produce an error")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/warning.osl"              REGEX "This should produce a warning" ARGS --warns-as-errors)
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/bad_macro_ellipsis.osl"   REGEX "expected '\\)', but got ','")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/bad_va_args.osl"          REGEX "'__VA_ARGS__' is only allowed inside variadic macros" ARGS --warns-as-errors)
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/too_many_args.osl"        REGEX "expected 1 argument\\(s\\) to macro 'TEST', but got 2")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/invalid_stringify.osl"    REGEX "stringification operator '#' must be followed by a macro parameter")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/define_defined.osl"       REGEX "'defined' cannot be used as a macro name")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/double_else.osl"             REGEX "'#else' after '#else'")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/undef.osl"                   REGEX "unknown macro")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/missing_include.osl"         REGEX "cannot find include file")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_if_0.osl"       REGEX "unterminated '#if'")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_if_1.osl"       REGEX "unterminated '#if'")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_if_if_0.osl"    REGEX "unterminated '#if'")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/macro_redefinition.osl"      REGEX "redefinition for macro 'FOO'" ARGS --warns-as-errors)
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/error.osl"                   REGEX "This should produce an error")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/warning.osl"                 REGEX "This should produce a warning" ARGS --warns-as-errors)
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/bad_macro_ellipsis.osl"      REGEX "expected '\\)', but got ','")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/bad_va_args.osl"             REGEX "'__VA_ARGS__' is only allowed inside variadic macros" ARGS --warns-as-errors)
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/too_many_args.osl"           REGEX "expected 1 argument\\(s\\) to macro 'TEST', but got 2")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/invalid_stringify.osl"       REGEX "stringification operator '#' must be followed by a macro parameter")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/define_defined.osl"          REGEX "'defined' cannot be used as a macro name")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/invalid_concat.osl"          REGEX "cannot concatenate '1' and 's'")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/invalid_condition.osl"       REGEX "expected condition, but got '\\+\\+'")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/extra_tokens.osl"            REGEX "extra tokens after '#endif'")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_macro_args.osl" REGEX "unterminated argument list for macro 'MACRO'")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_include.osl"
+    REGEX "\
+expected include file name, but got '\"unterminated_file_name_quotes'.*\
+unterminated include file name")
+
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/bad_concat_operator.osl"
+    REGEX "\
+invalid use of concatenation operator '##'.*\
+invalid use of concatenation operator '##'.*\
+invalid use of concatenation operator '##'")
+
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/div_by_zero.osl"
+    REGEX "\
+division by zero while evaluating condition.*#if 1 / 0.*\
+division by zero while evaluating condition.*#if 1 % 0")
 
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/if_elif_else.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/warning.osl")
@@ -53,7 +72,10 @@ add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/variadic_macros.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/ignore_va_args.osl")
 
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/concat.osl")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/empty_va_args.osl")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/ifdef_ifndef_elifdef_elifndef.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/if_defined.osl")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/conditions.osl")
 
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/stringify.osl" ARGS --print-ast REGEX
     REGEX ".*\

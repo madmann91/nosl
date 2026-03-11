@@ -1,0 +1,3 @@
+#define CAT1(x, y) x##
+#define CAT2(x, y) ##y
+#define CAT3(x, y) ####

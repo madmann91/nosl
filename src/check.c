@@ -995,6 +995,7 @@ static const struct type* check_builtin_unary_expr(
 {
     const struct type* arg_type = ast->unary_expr.arg->type;
     switch (ast->unary_expr.tag) {
+        case UNARY_EXPR_PLUS:
         case UNARY_EXPR_NEG:
             if (type_is_triple(arg_type) || type_is_matrix(arg_type) || type_is_closure_color(arg_type))
                 return arg_type;
@@ -1005,7 +1006,9 @@ static const struct type* check_builtin_unary_expr(
         case UNARY_EXPR_POST_DEC:
             if (type_is_prim_type(arg_type, PRIM_TYPE_FLOAT))
                 return arg_type;
-            [[fallthrough]];
+            if (type_is_prim_type(arg_type, PRIM_TYPE_INT))
+                return arg_type;
+            break;
         case UNARY_EXPR_BIT_NOT:
         case UNARY_EXPR_NOT:
             if (type_is_prim_type(arg_type, PRIM_TYPE_INT))
@@ -1038,7 +1041,7 @@ static const struct type* check_unary_expr(
     if (is_inc_or_dec)
         expect_mutable(type_checker, ast->unary_expr.arg);
 
-    if (are_all_prim_or_closure_type(ast->unary_expr.arg)) {
+    if (are_all_prim_or_closure_type(ast->unary_expr.arg) || ast->unary_expr.tag == UNARY_EXPR_PLUS) {
         ast->type = check_builtin_unary_expr(type_checker, ast);
     } else {
         const char* func_name = unary_expr_tag_to_func_name(ast->unary_expr.tag);

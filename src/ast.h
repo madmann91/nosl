@@ -15,6 +15,7 @@
     x(POST_DEC, "--") \
     x(BIT_NOT,  "~") \
     x(NEG,      "-") \
+    x(PLUS,     "+") \
     x(NOT,      "!")
 
 #define ASSIGN_EXPR_LIST(x) \
@@ -291,6 +292,9 @@ SMALL_VEC_DECL(small_ast_vec, struct ast*, PUBLIC)
 [[nodiscard]] bool func_name_is_binary_operator(const char*);
 [[nodiscard]] bool func_name_is_unary_operator(const char*);
 [[nodiscard]] bool func_name_is_operator(const char*);
+[[nodiscard]] enum binary_expr_tag token_tag_to_binary_expr_tag(enum token_tag);
+[[nodiscard]] enum unary_expr_tag token_tag_to_unary_expr_tag(enum token_tag, bool is_prefix);
+[[nodiscard]] int binary_expr_max_precedence(bool include_assign);
 [[nodiscard]] enum binary_expr_tag binary_expr_tag_remove_assign(enum binary_expr_tag);
 [[nodiscard]] bool binary_expr_tag_is_assign(enum binary_expr_tag);
 [[nodiscard]] bool binary_expr_tag_is_logic(enum binary_expr_tag);

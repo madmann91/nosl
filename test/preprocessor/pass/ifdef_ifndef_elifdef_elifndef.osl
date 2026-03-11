@@ -1,0 +1,13 @@
+#define MACRO
+
+#ifdef MACRO_WITH_VERY_LONG_NAME
+#error "MACRO_WITH_VERY_LONG_NAME is defined"
+#elifdef YET_ANOTHER_MACRO_WITH_VERY_LONG_NAME
+#error "YET_ANOTHER_MACRO_WITH_VERY_LONG_NAME is defined"
+#elifndef MACRO
+#error "MACRO is not defined"
+#endif
+
+#ifndef MACRO
+#error "MACRO is not defined"
+#endif
