@@ -28,8 +28,6 @@ Make sure to download and update submodules before building:
 
 ### Instructions
 
-Just run the following commands:
-
     mkdir build
     cd build
     cmake ..

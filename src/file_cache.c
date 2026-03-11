@@ -73,8 +73,10 @@ struct file_cache* file_cache_create(void) {
 }
 
 void file_cache_destroy(struct file_cache* file_cache) {
-    MAP_FOREACH_VAL(struct cached_file*, cached_file, file_cache->cached_files)
-        free_cached_file(*cached_file);
+    MAP_FOREACH_VAL(struct cached_file*, cached_file, file_cache->cached_files) {
+        if (*cached_file)
+            free_cached_file(*cached_file);
+    }
 
     cached_file_map_destroy(&file_cache->cached_files);
     mem_pool_destroy(&file_cache->mem_pool);
@@ -84,7 +86,7 @@ void file_cache_destroy(struct file_cache* file_cache) {
 
 static const char* canonicalize_file_name(struct file_cache* file_cache, const char* file_name) {
     char* canonical_path = full_path(file_name);
-    const char* unique_path = str_pool_insert(file_cache->str_pool, canonical_path);
+    const char* unique_path = str_pool_insert(file_cache->str_pool, canonical_path ? canonical_path : file_name);
     free(canonical_path);
     return unique_path;
 }
