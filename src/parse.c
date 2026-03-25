@@ -315,7 +315,7 @@ static struct ast* parse_pre_unary_expr(struct parser* parser) {
     assert(tag != UNARY_EXPR_INVALID && "invalid prefix unary operation");
     read_token(parser);
 
-    struct ast* arg = parse_expr(parser);
+    struct ast* arg = parse_primary_expr(parser);
     return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_UNARY_EXPR,
         .unary_expr = {
