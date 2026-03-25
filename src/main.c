@@ -12,6 +12,7 @@
 #include <overture/term.h>
 #include <overture/vec.h>
 #include <overture/str.h>
+#include <overture/file.h>
 
 #include <stdio.h>
 #include <stdint.h>
@@ -35,6 +36,15 @@ struct options {
     uint32_t max_warns;
     uint32_t max_errors;
 };
+
+#ifdef ENABLE_BUILTINS
+#define BUILTINS_LINE_COUNT 512
+static const char* builtins_name = "builtins.osl";
+static const char builtins_data[] = {
+#embed "builtins.osl.preprocessed"
+    , 0
+};
+#endif
 
 static struct options options_create() {
     return (struct options) {
@@ -125,14 +135,23 @@ static void register_user_macros(struct preprocessor* preprocessor, const struct
     }
 }
 
-static struct str_view read_line(void* data, const char* file_name, uint32_t line) {
+static struct file_line read_line(void* data, const char* file_name, uint32_t line) {
+#if ENABLE_BUILTINS
+    // Compare the filename and the builtins filename by their address, since the lexer keeps the
+    // same file name string in the location info.
+    if (file_name == builtins_name)
+        return (struct file_line) {};
+#endif
     struct file_cache* file_cache = data;
     const struct cached_file* cached_file = file_cache_read(file_cache, file_name);
     if (!cached_file)
-        return (struct str_view) {};
+        return (struct file_line) {};
     if (line == 0 || line > cached_file->line_count)
-        return (struct str_view) {};
-    return cached_file->lines[line - 1];
+        return (struct file_line) {};
+    return (struct file_line) {
+        .is_valid = true,
+        .contents = cached_file->lines[line - 1]
+    };
 }
 
 static bool compile_file(
@@ -156,12 +175,14 @@ static bool compile_file(
         .line_reader = &line_reader
     };
 
-    struct preprocessor* preprocessor = preprocessor_open(
-        &log, file_cache, file_name, (const char* const*)options->include_dirs.elems);
-    if (!preprocessor) {
+    if (!is_file(file_name) || !file_exists(file_name)) {
         log_error(&log, NULL, "cannot open '%s'\n", file_name);
         return false;
     }
+
+    struct preprocessor* preprocessor = preprocessor_open(
+        &log, file_cache, file_name, (const char* const*)options->include_dirs.elems);
+    assert(preprocessor);
 
     register_standard_macros(preprocessor);
     register_user_macros(preprocessor, options);
@@ -229,12 +250,7 @@ static struct ast* parse_builtins(
         .max_errors = 1
     };
 
-    static const char builtins_data[] = {
-#embed "builtins.osl.preprocessed"
-        , 0
-    };
-
-    struct lexer lexer = lexer_create("builtins.osl", STR_VIEW(builtins_data));
+    struct lexer lexer = lexer_create(builtins_name, STR_VIEW(builtins_data));
     struct ast* builtins = parse_with_lexer(mem_pool, &lexer, &log);
     check(mem_pool, type_table, builtins, &log);
     assert(log.error_count == 0 && log.warn_count == 0);
