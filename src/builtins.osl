@@ -25,12 +25,6 @@
 #define PER_COMPONENT_N(type, func, n) \
     PER_COMPONENT(type, func, PARAMS_##n, ARGS_##n)
 
-#define PER_TRIPLE(inst, ...) \
-    inst(vector, __VA_ARGS__) \
-    inst(color, __VA_ARGS__) \
-    inst(point, __VA_ARGS__) \
-    inst(normal, __VA_ARGS__)
-
 #define DET2(m00, m01, m10, m11) (m00 * m01 - m10 * m11)
 
 #define DET3(m00, m01, m02, m10, m11, m12, m20, m21, m22) \
@@ -198,54 +192,54 @@ __attribute__((builtin)) float erfc(float);
 
 // Instantiate those functions per-component for each triple type.
 
-PER_TRIPLE(PER_COMPONENT_N, radians, 1)
-PER_TRIPLE(PER_COMPONENT_N, degrees, 1)
-PER_TRIPLE(PER_COMPONENT_N, cos, 1)
-PER_TRIPLE(PER_COMPONENT_N, sin, 1)
-PER_TRIPLE(PER_COMPONENT_N, tan, 1)
-PER_TRIPLE(PER_COMPONENT_N, cosh, 1)
-PER_TRIPLE(PER_COMPONENT_N, sinh, 1)
-PER_TRIPLE(PER_COMPONENT_N, tanh, 1)
-PER_TRIPLE(PER_COMPONENT_N, acos, 1)
-PER_TRIPLE(PER_COMPONENT_N, asin, 1)
-PER_TRIPLE(PER_COMPONENT_N, atan, 1)
-PER_TRIPLE(PER_COMPONENT_N, exp, 1)
-PER_TRIPLE(PER_COMPONENT_N, exp2, 1)
-PER_TRIPLE(PER_COMPONENT_N, expm1, 1)
-PER_TRIPLE(PER_COMPONENT_N, log, 1)
-PER_TRIPLE(PER_COMPONENT_N, log2, 1)
-PER_TRIPLE(PER_COMPONENT_N, log10, 1)
-PER_TRIPLE(PER_COMPONENT_N, logb, 1)
-PER_TRIPLE(PER_COMPONENT_N, sqrt, 1)
-PER_TRIPLE(PER_COMPONENT_N, inversesqrt, 1)
-PER_TRIPLE(PER_COMPONENT_N, cbrt, 1)
-PER_TRIPLE(PER_COMPONENT_N, abs, 1)
-PER_TRIPLE(PER_COMPONENT_N, fabs, 1)
-PER_TRIPLE(PER_COMPONENT_N, sign, 1)
-PER_TRIPLE(PER_COMPONENT_N, floor, 1)
-PER_TRIPLE(PER_COMPONENT_N, ceil, 1)
-PER_TRIPLE(PER_COMPONENT_N, round, 1)
-PER_TRIPLE(PER_COMPONENT_N, trunc, 1)
+PER_COMPONENT_N(vector, radians, 1)
+PER_COMPONENT_N(vector, degrees, 1)
+PER_COMPONENT_N(vector, cos, 1)
+PER_COMPONENT_N(vector, sin, 1)
+PER_COMPONENT_N(vector, tan, 1)
+PER_COMPONENT_N(vector, cosh, 1)
+PER_COMPONENT_N(vector, sinh, 1)
+PER_COMPONENT_N(vector, tanh, 1)
+PER_COMPONENT_N(vector, acos, 1)
+PER_COMPONENT_N(vector, asin, 1)
+PER_COMPONENT_N(vector, atan, 1)
+PER_COMPONENT_N(vector, exp, 1)
+PER_COMPONENT_N(vector, exp2, 1)
+PER_COMPONENT_N(vector, expm1, 1)
+PER_COMPONENT_N(vector, log, 1)
+PER_COMPONENT_N(vector, log2, 1)
+PER_COMPONENT_N(vector, log10, 1)
+PER_COMPONENT_N(vector, logb, 1)
+PER_COMPONENT_N(vector, sqrt, 1)
+PER_COMPONENT_N(vector, inversesqrt, 1)
+PER_COMPONENT_N(vector, cbrt, 1)
+PER_COMPONENT_N(vector, abs, 1)
+PER_COMPONENT_N(vector, fabs, 1)
+PER_COMPONENT_N(vector, sign, 1)
+PER_COMPONENT_N(vector, floor, 1)
+PER_COMPONENT_N(vector, ceil, 1)
+PER_COMPONENT_N(vector, round, 1)
+PER_COMPONENT_N(vector, trunc, 1)
 
-PER_TRIPLE(PER_COMPONENT_N, atan2, 2)
-PER_TRIPLE(PER_COMPONENT_N, pow, 2)
-PER_TRIPLE(PER_COMPONENT_N, log, 2)
-PER_TRIPLE(PER_COMPONENT_N, mod, 2)
-PER_TRIPLE(PER_COMPONENT_N, fmod, 2)
-PER_TRIPLE(PER_COMPONENT_N, min, 2)
-PER_TRIPLE(PER_COMPONENT_N, max, 2)
+PER_COMPONENT_N(vector, atan2, 2)
+PER_COMPONENT_N(vector, pow, 2)
+PER_COMPONENT_N(vector, log, 2)
+PER_COMPONENT_N(vector, mod, 2)
+PER_COMPONENT_N(vector, fmod, 2)
+PER_COMPONENT_N(vector, min, 2)
+PER_COMPONENT_N(vector, max, 2)
 
-PER_TRIPLE(PER_COMPONENT_N, mix, 3)
-PER_TRIPLE(PER_COMPONENT_N, select, 3)
+PER_COMPONENT_N(vector, mix, 3)
+PER_COMPONENT_N(vector, select, 3)
 
-#define SINCOS(type, ignored) \
+#define SINCOS(type) \
     __attribute__((always_inline)) void sincos(type x, output type y, output type z) { \
         sincos(x[0], y[0], z[0]); \
         sincos(x[1], y[1], z[1]); \
         sincos(x[2], y[2], z[2]); \
     }
 
-PER_TRIPLE(SINCOS,)
+SINCOS(vector)
 
 #undef SINCOS
 
@@ -418,14 +412,10 @@ float smooth_linearstep(float edge0, float edge1, float x_, float eps_) {
     }
 }
 
-PER_TRIPLE(PER_COMPONENT_N, step, 2)
-
+PER_COMPONENT_N(vector, step, 2)
 PER_COMPONENT_N(vector, smoothstep, 3)
-PER_COMPONENT_N(color,  smoothstep, 3)
 PER_COMPONENT_N(vector, linearstep, 3)
-PER_COMPONENT_N(color,  linearstep, 3)
 PER_COMPONENT_N(vector, smooth_linearstep, 4)
-PER_COMPONENT_N(color,  smooth_linearstep, 4)
 
 // Fresnel function -------------------------------------------------------------------------------
 
@@ -483,4 +473,3 @@ __attribute__((builtin)) bool raytype(string);
 
 #undef PER_COMPONENT
 #undef PER_COMPONENT_N
-#undef PER_TRIPLE
