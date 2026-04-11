@@ -6,7 +6,7 @@ remains completely compatible with the standard OSL implementation.
 ## Status
 
 - [ ] Preprocessor
-    - `#line` and `#pragma once` support is missing
+    - `#line` support is missing
     - `__LINE__`, `__FILE__` are missing
 - [X] Parser
 - [ ] Type-checker

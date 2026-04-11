@@ -1,0 +1,6 @@
+#include "include/include_once.inc"
+#include "include/include_once.inc"
+
+int foo() { return FOO; }
+
+shader test() {}

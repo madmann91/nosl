@@ -77,7 +77,7 @@ enum context_tag {
 };
 
 struct source_file {
-    const char* file_name;
+    struct cached_file* cached_file;
     struct lexer lexer;
     struct cond_stack cond_stack;
 };
@@ -200,19 +200,11 @@ static inline void finalize_context(struct context* context) {
         advance_context(context);
 }
 
-static inline struct context* open_source_file_context(
-    struct file_cache* file_cache,
-    struct context* prev,
-    const char* file_name)
-{
-    const struct cached_file* cached_file = file_cache_read(file_cache, file_name);
-    if (!cached_file)
-        return NULL;
-
+static inline struct context* alloc_source_file_context(struct cached_file* cached_file, struct context* prev) {
     struct context* context = alloc_context(prev, CONTEXT_SOURCE_FILE);
-    context->source_file.file_name = file_name;
     context->source_file.cond_stack.conds = cond_vec_create();
-    context->source_file.lexer = lexer_create(file_name, cached_file->file_data);
+    context->source_file.lexer = lexer_create(cached_file->file_name, cached_file->file_data);
+    context->source_file.cached_file = cached_file;
     finalize_context(context);
     return context;
 }
@@ -603,9 +595,11 @@ struct preprocessor* preprocessor_open(
     const char* file_name,
     const char* const* include_paths)
 {
-    struct context* context = open_source_file_context(file_cache, NULL, file_name);
-    if (!context)
+    struct cached_file* cached_file = file_cache_read(file_cache, file_name);
+    if (!cached_file)
         return NULL;
+
+    file_cache_reset(file_cache);
 
     struct preprocessor* preprocessor = xmalloc(sizeof(struct preprocessor));
     preprocessor->log = log;
@@ -618,7 +612,7 @@ struct preprocessor* preprocessor_open(
 
     register_standard_macros(preprocessor);
 
-    push_context(preprocessor, context);
+    push_context(preprocessor, alloc_source_file_context(cached_file, NULL));
     return preprocessor;
 }
 
@@ -1057,7 +1051,15 @@ static void parse_file(struct preprocessor* preprocessor, struct file_loc* loc) 
 }
 
 static void parse_pragma(struct preprocessor* preprocessor, struct file_loc* loc) {
-    ignore_directive(preprocessor, "pragma", loc);
+    struct token token = peek_token(preprocessor);
+    if (token.tag == TOKEN_IDENT && str_view_is_equal(&token.contents, &STR_VIEW("once"))) {
+        assert(preprocessor->context->tag == CONTEXT_SOURCE_FILE);
+        preprocessor->context->source_file.cached_file->has_pragma_once = true;
+        eat_token(preprocessor, TOKEN_IDENT);
+        eat_extra_tokens(preprocessor, "pragma");
+    } else {
+        ignore_directive(preprocessor, "pragma", loc);
+    }
 }
 
 static struct str_view parse_include_file_name(struct preprocessor* preprocessor) {
@@ -1115,7 +1117,7 @@ static bool find_include_file_name(
             if (context->tag != CONTEXT_SOURCE_FILE)
                 continue;
 
-            struct str_view include_path = split_path(STR_VIEW(context->source_file.file_name)).dir_name;
+            struct str_view include_path = split_path(STR_VIEW(context->source_file.cached_file->file_name)).dir_name;
             if (does_file_exist_in_path(include_path, include_file_name, full_path))
                 return true;
         }
@@ -1128,22 +1130,17 @@ static bool find_include_file_name(
     return false;
 }
 
-static struct context* open_include_file_context(
+static struct cached_file* find_include_file(
     struct preprocessor* preprocessor,
     struct str_view include_file_name,
     bool is_relative_include)
 {
     struct str full_path = str_create();
-    struct context* context = NULL;
-    if (find_include_file_name(preprocessor, include_file_name, is_relative_include, &full_path)) {
-        context = open_source_file_context(
-            preprocessor->file_cache,
-            preprocessor->context,
-            str_pool_insert(preprocessor->str_pool, full_path.data));
-        assert(context);
-    }
+    struct cached_file* cached_file = NULL;
+    if (find_include_file_name(preprocessor, include_file_name, is_relative_include, &full_path))
+        cached_file = file_cache_read(preprocessor->file_cache, full_path.data);
     str_destroy(&full_path);
-    return context;
+    return cached_file;
 }
 
 static bool skip_include_file_delimiters(struct str_view* include_file_name) {
@@ -1160,11 +1157,11 @@ static bool skip_include_file_delimiters(struct str_view* include_file_name) {
 static void parse_include(struct preprocessor* preprocessor, struct file_loc* loc) {
     struct str_view include_file_name = parse_include_file_name(preprocessor);
 
-    struct context* context = NULL;
+    struct cached_file* cached_file = NULL;
     if (include_file_name.length > 0) {
         bool is_relative_include = skip_include_file_delimiters(&include_file_name);
-        context = open_include_file_context(preprocessor, include_file_name, is_relative_include);
-        if (!context) {
+        cached_file = find_include_file(preprocessor, include_file_name, is_relative_include);
+        if (!cached_file) {
             log_error(preprocessor->log, loc, "cannot find include file '%.*s'",
                 (int)include_file_name.length, include_file_name.data);
         }
@@ -1172,8 +1169,8 @@ static void parse_include(struct preprocessor* preprocessor, struct file_loc* lo
 
     eat_extra_tokens(preprocessor, "include");
 
-    if (context)
-        push_context(preprocessor, context);
+    if (cached_file && !cached_file->has_pragma_once)
+        push_context(preprocessor, alloc_source_file_context(cached_file, preprocessor->context));
 }
 
 static inline bool is_control_directive(enum directive directive) {

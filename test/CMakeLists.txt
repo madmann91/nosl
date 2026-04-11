@@ -44,6 +44,7 @@ add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/invalid_concat.osl"   
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/invalid_condition.osl"       REGEX "expected condition, but got '\\+\\+'")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/extra_tokens.osl"            REGEX "extra tokens after '#endif'")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_macro_args.osl" REGEX "unterminated argument list for macro 'MACRO'")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/pragma.osl"                  REGEX "ignoring '#pragma'" ARGS --warns-as-errors)
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_include.osl"
     REGEX "\
 expected include file name, but got '\"unterminated_file_name_quotes'.*\
@@ -63,7 +64,7 @@ division by zero while evaluating condition.*#if 1 % 0")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/if_elif_else.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/warning.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/line.osl")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/pragma.osl")
+add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/pragma_once.osl" ARGS --warns-as-errors)
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/undef.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/include.osl" ARGS -I ${PROJECT_SOURCE_DIR})
 
