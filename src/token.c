@@ -37,3 +37,16 @@ bool token_tag_is_keyword(enum token_tag tag) {
             return false;
     }
 }
+
+struct str_view token_printable_contents(const struct token* token) {
+    if (token_tag_is_keyword(token->tag) ||
+        token_tag_is_symbol(token->tag) ||
+        token->tag == TOKEN_ERROR ||
+        token->tag == TOKEN_IDENT ||
+        token->tag == TOKEN_INT_LITERAL ||
+        token->tag == TOKEN_FLOAT_LITERAL ||
+        token->tag == TOKEN_STRING_LITERAL)
+        return token->contents;
+    const char* raw_str = token_tag_to_string(token->tag);
+    return STR_VIEW(raw_str);
+}

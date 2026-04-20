@@ -310,10 +310,11 @@ static inline bool accept_token(struct preprocessor* preprocessor, enum token_ta
 static inline bool expect_token(struct preprocessor* preprocessor, enum token_tag tag) {
     if (!accept_token(preprocessor, tag)) {
         struct token token = peek_token(preprocessor);
+        struct str_view contents = token_printable_contents(&token);
         log_error(preprocessor->log, &token.loc,
             "expected '%s', but got '%.*s'",
             token_tag_to_string(tag),
-            (int)token.contents.length, token.contents.data);
+            (int)contents.length, contents.data);
         return false;
     }
     return true;
@@ -1053,9 +1054,6 @@ static void parse_line(struct preprocessor* preprocessor, struct file_loc* loc) 
     assert(preprocessor->context->tag == CONTEXT_SOURCE_FILE);
     struct source_file* source_file = &preprocessor->context->source_file;
 
-    uint32_t displayed_line = 0;
-    const char* displayed_file_name = NULL;
-
     struct token line_token = expand_token(preprocessor);
     if (line_token.tag != TOKEN_INT_LITERAL) {
         log_error(preprocessor->log, loc, "missing or invalid line number in '#line' directive");
@@ -1063,27 +1061,25 @@ static void parse_line(struct preprocessor* preprocessor, struct file_loc* loc) 
             eat_extra_tokens(preprocessor, "line");
         return;
     }
-    displayed_line = line_token.int_literal;
 
     struct token file_name_token = expand_token(preprocessor);
     if (file_name_token.tag == TOKEN_STRING_LITERAL) {
-        displayed_file_name = str_pool_insert_view(preprocessor->str_pool, file_name_token.string_literal);
+        source_file->displayed_file_name = str_pool_insert_view(preprocessor->str_pool, file_name_token.string_literal);
+        eat_extra_tokens(preprocessor, "line");
     } else if (file_name_token.tag != TOKEN_NL) {
         log_error(preprocessor->log, &file_name_token.loc, "invalid file name '%.*s' in '#line' directive",
             (int)file_name_token.contents.length, file_name_token.contents.data);
-    }
-    if (file_name_token.tag != TOKEN_NL)
         eat_extra_tokens(preprocessor, "line");
+        return;
+    }
 
+    uint32_t displayed_line = line_token.int_literal;
     source_file->displayed_line = ++displayed_line;
-    if (displayed_file_name)
-        source_file->displayed_file_name = displayed_file_name;
 
     // Update the already extracted tokens so that they also have the updated line info.
     for (int i = 0; i < TOKENS_AHEAD; ++i) {
         struct token* token = &preprocessor->context->ahead[i];
-        if (displayed_file_name)
-            token->loc.displayed_file_name = displayed_file_name;
+        token->loc.displayed_file_name = source_file->displayed_file_name;
         token->loc.displayed_line = displayed_line;
         if (token->tag == TOKEN_NL)
             displayed_line++;

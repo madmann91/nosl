@@ -56,11 +56,12 @@ static inline bool accept_token(struct parser* parser, enum token_tag tag) {
 
 static inline bool expect_token(struct parser* parser, enum token_tag tag) {
     if (!accept_token(parser, tag)) {
+        struct str_view contents = token_printable_contents(parser->ahead);
         log_error(parser->log,
             &parser->ahead->loc,
             "expected '%s', but got '%.*s'",
             token_tag_to_string(tag),
-            (int)parser->ahead->contents.length, parser->ahead->contents.data);
+            (int)contents.length, contents.data);
         return false;
     }
     return true;

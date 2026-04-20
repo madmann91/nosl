@@ -148,5 +148,6 @@ SMALL_VEC_DECL(small_token_vec, struct token, PUBLIC)
 [[nodiscard]] const char* token_tag_to_string(enum token_tag);
 [[nodiscard]] bool token_tag_is_symbol(enum token_tag);
 [[nodiscard]] bool token_tag_is_keyword(enum token_tag);
+[[nodiscard]] struct str_view token_printable_contents(const struct token*);
 
 [[nodiscard]] struct token token_concat(const struct token*, const struct token*);
