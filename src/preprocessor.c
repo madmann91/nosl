@@ -28,7 +28,6 @@
     x(ELIFNDEF, "elifndef") \
     x(UNDEF, "undef") \
     x(PRAGMA, "pragma") \
-    x(FILE, "file") \
     x(LINE, "line") \
     x(WARNING, "warning") \
     x(ERROR, "error")
@@ -80,6 +79,8 @@ struct source_file {
     struct cached_file* cached_file;
     struct lexer lexer;
     struct cond_stack cond_stack;
+    const char* displayed_file_name;
+    uint32_t displayed_line;
 };
 
 struct token_buffer {
@@ -183,6 +184,8 @@ static inline void advance_context(struct context* context) {
     struct token token = { .tag = TOKEN_EOF };
     if (context->tag == CONTEXT_SOURCE_FILE) {
         token = lexer_advance(&context->source_file.lexer);
+        token.loc.displayed_file_name = context->source_file.displayed_file_name;
+        token.loc.displayed_line = context->source_file.displayed_line;
     } else if (context->tag == CONTEXT_TOKEN_BUFFER) {
         if (context->token_buffer.token_index < context->token_buffer.tokens.elem_count)
             token = context->token_buffer.tokens.elems[context->token_buffer.token_index++];
@@ -192,6 +195,8 @@ static inline void advance_context(struct context* context) {
     for (int i = 0; i < TOKENS_AHEAD - 1; ++i)
         context->ahead[i] = context->ahead[i + 1];
     context->ahead[TOKENS_AHEAD - 1] = token;
+    if (context->tag == CONTEXT_SOURCE_FILE && context->ahead[0].tag == TOKEN_NL)
+        context->source_file.displayed_line++;
 }
 
 static inline void finalize_context(struct context* context) {
@@ -205,6 +210,8 @@ static inline struct context* alloc_source_file_context(struct cached_file* cach
     context->source_file.cond_stack.conds = cond_vec_create();
     context->source_file.lexer = lexer_create(cached_file->file_name, cached_file->file_data);
     context->source_file.cached_file = cached_file;
+    context->source_file.displayed_file_name = cached_file->file_name;
+    context->source_file.displayed_line = 1;
     finalize_context(context);
     return context;
 }
@@ -302,7 +309,7 @@ static inline bool accept_token(struct preprocessor* preprocessor, enum token_ta
 
 static inline bool expect_token(struct preprocessor* preprocessor, enum token_tag tag) {
     if (!accept_token(preprocessor, tag)) {
-        struct token token = preprocessor->context->ahead[0];
+        struct token token = peek_token(preprocessor);
         log_error(preprocessor->log, &token.loc,
             "expected '%s', but got '%.*s'",
             token_tag_to_string(tag),
@@ -1043,11 +1050,44 @@ static inline void ignore_directive(struct preprocessor* preprocessor, const cha
 }
 
 static void parse_line(struct preprocessor* preprocessor, struct file_loc* loc) {
-    ignore_directive(preprocessor, "line", loc);
-}
+    assert(preprocessor->context->tag == CONTEXT_SOURCE_FILE);
+    struct source_file* source_file = &preprocessor->context->source_file;
 
-static void parse_file(struct preprocessor* preprocessor, struct file_loc* loc) {
-    ignore_directive(preprocessor, "file", loc);
+    uint32_t displayed_line = 0;
+    const char* displayed_file_name = NULL;
+
+    struct token line_token = expand_token(preprocessor);
+    if (line_token.tag != TOKEN_INT_LITERAL) {
+        log_error(preprocessor->log, loc, "missing or invalid line number in '#line' directive");
+        if (line_token.tag != TOKEN_NL)
+            eat_extra_tokens(preprocessor, "line");
+        return;
+    }
+    displayed_line = line_token.int_literal;
+
+    struct token file_name_token = expand_token(preprocessor);
+    if (file_name_token.tag == TOKEN_STRING_LITERAL) {
+        displayed_file_name = str_pool_insert_view(preprocessor->str_pool, file_name_token.string_literal);
+    } else if (file_name_token.tag != TOKEN_NL) {
+        log_error(preprocessor->log, &file_name_token.loc, "invalid file name '%.*s' in '#line' directive",
+            (int)file_name_token.contents.length, file_name_token.contents.data);
+    }
+    if (file_name_token.tag != TOKEN_NL)
+        eat_extra_tokens(preprocessor, "line");
+
+    source_file->displayed_line = ++displayed_line;
+    if (displayed_file_name)
+        source_file->displayed_file_name = displayed_file_name;
+
+    // Update the already extracted tokens so that they also have the updated line info.
+    for (int i = 0; i < TOKENS_AHEAD; ++i) {
+        struct token* token = &preprocessor->context->ahead[i];
+        if (displayed_file_name)
+            token->loc.displayed_file_name = displayed_file_name;
+        token->loc.displayed_line = displayed_line;
+        if (token->tag == TOKEN_NL)
+            displayed_line++;
+    }
 }
 
 static void parse_pragma(struct preprocessor* preprocessor, struct file_loc* loc) {
@@ -1218,7 +1258,6 @@ static void parse_directive(struct preprocessor* preprocessor) {
         case DIRECTIVE_WARNING:  parse_warning(preprocessor);               break;
         case DIRECTIVE_ERROR:    parse_error(preprocessor);                 break;
         case DIRECTIVE_LINE:     parse_line(preprocessor, &token.loc);      break;
-        case DIRECTIVE_FILE:     parse_file(preprocessor, &token.loc);      break;
         case DIRECTIVE_PRAGMA:   parse_pragma(preprocessor, &token.loc);    break;
         case DIRECTIVE_INCLUDE:  parse_include(preprocessor, &token.loc);   break;
         default:
