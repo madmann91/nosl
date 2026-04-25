@@ -417,6 +417,66 @@ PER_COMPONENT_N(vector, smoothstep, 3)
 PER_COMPONENT_N(vector, linearstep, 3)
 PER_COMPONENT_N(vector, smooth_linearstep, 4)
 
+__attribute__((builtin)) float noise(string, float, ...);
+__attribute__((builtin)) float noise(string, float, float, ...);
+__attribute__((builtin)) float noise(string, point, ...);
+__attribute__((builtin)) float noise(string, point, float, ...);
+__attribute__((builtin)) vector noise(string, float, ...);
+__attribute__((builtin)) vector noise(string, float, float, ...);
+__attribute__((builtin)) vector noise(string, point, ...);
+__attribute__((builtin)) vector noise(string, point, float, ...);
+
+__attribute__((builtin)) float pnoise(string, float, float);
+__attribute__((builtin)) float pnoise(string, float, float, float, float);
+__attribute__((builtin)) float pnoise(string, point, point);
+__attribute__((builtin)) float pnoise(string, point, float, point, float);
+__attribute__((builtin)) vector pnoise(string, float, float);
+__attribute__((builtin)) vector pnoise(string, float, float, float, float);
+__attribute__((builtin)) vector pnoise(string, point, point);
+__attribute__((builtin)) vector pnoise(string, point, float, point, float);
+
+#define NOISE_FUNCTION(name, type) \
+    __attribute__((always_inline)) float name(float u) { return noise(#type, u); } \
+    __attribute__((always_inline)) float name(float u, float v) { return noise(#type, u, v); } \
+    __attribute__((always_inline)) float name(point p) { return noise(#type, p); } \
+    __attribute__((always_inline)) float name(point p, float t) { return noise(#type, p, t); } \
+    __attribute__((always_inline)) vector name(float u) { return noise(#type, u); } \
+    __attribute__((always_inline)) vector name(float u, float v) { return noise(#type, u, v); } \
+    __attribute__((always_inline)) vector name(point p) { return noise(#type, p); } \
+    __attribute__((always_inline)) vector name(point p, float t) { return noise(#type, p, t); }
+
+#define PNOISE_FUNCTION(name, type) \
+    __attribute__((always_inline)) float name(float u, float up) { return pnoise(#type, u, up); } \
+    __attribute__((always_inline)) float name(float u, float v, float up, float vp) { return pnoise(#type, u, v, up, vp); } \
+    __attribute__((always_inline)) float name(point p, point pp) { return pnoise(#type, p, pp); } \
+    __attribute__((always_inline)) float name(point p, float t, point pp, float tp) { return pnoise(#type, p, t, pp, tp); } \
+    __attribute__((always_inline)) vector name(float u, float up) { return pnoise(#type, u, up); } \
+    __attribute__((always_inline)) vector name(float u, float v, float up, float vp) { return pnoise(#type, u, v, up, vp); } \
+    __attribute__((always_inline)) vector name(point p, point pp) { return pnoise(#type, p, pp); } \
+    __attribute__((always_inline)) vector name(point p, float t, point pp, float tp) { return pnoise(#type, p, t, pp, tp); }
+
+NOISE_FUNCTION(noise, uperlin)
+NOISE_FUNCTION(snoise, perlin)
+NOISE_FUNCTION(cell_noise, cell)
+NOISE_FUNCTION(hash_noise, hash)
+
+PNOISE_FUNCTION(pnoise, uperlin)
+PNOISE_FUNCTION(psnoise, perlin)
+
+#undef NOISE_FUNCTION
+#undef PNOISE_FUNCTION
+
+__attribute__((builtin)) int hash(float);
+__attribute__((builtin)) int hash(float, float);
+__attribute__((builtin)) int hash(point);
+__attribute__((builtin)) int hash(point, float);
+__attribute__((builtin)) int hash(int);
+
+__attribute__((builtin)) float spline(string, float, ...);
+__attribute__((builtin)) vector spline(string, float, ...);
+
+__attribute__((builtin)) float splineinverse(string, float, ...);
+
 // Fresnel function -------------------------------------------------------------------------------
 
 void fresnel(
