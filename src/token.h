@@ -97,7 +97,7 @@
     x(LSHIFT_EQ, "<<=",) \
     x(RSHIFT_EQ, ">>=",) \
     x(ELLIPSIS, "...",) \
-    x(BACKSLASH, "\\")
+    x(BACKSLASH, "\\",)
 
 #define TOKEN_LIST(x) \
     x(ERROR, "<invalid token>",) \
