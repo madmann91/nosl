@@ -1,0 +1,9 @@
+shader test() {
+#line -1
+#line foo
+#line 3 3
+#define FILE_NAME "abcd"
+#define LINE_NO 3
+#line LINE_NO FILE_NAME
+#error "THIS MESSAGE SHOULD APPEAR ON LINE 4 IN FILE abcd"
+}

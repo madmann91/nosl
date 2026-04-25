@@ -12,6 +12,7 @@
 
 #include <string.h>
 #include <assert.h>
+#include <inttypes.h>
 
 #define TOKENS_AHEAD 2
 
@@ -53,14 +54,17 @@ struct cond_stack {
     size_t inactive_cond_depth;
 };
 
+typedef void (*custom_macro_callback)(struct preprocessor*, struct file_loc*);
+
 struct macro {
     bool has_params;
     bool is_variadic;
+    bool is_disabled;
     size_t param_count;
     const char* name;
     struct token_vec tokens;
     struct file_loc loc;
-    bool is_disabled;
+    custom_macro_callback callback;
 };
 
 enum directive {
@@ -357,6 +361,15 @@ static const struct token_vec* expand_macro_arg(struct preprocessor* preprocesso
     return &macro_arg->expanded_tokens;
 }
 
+static inline struct token make_string_literal_token(struct str_view contents, const struct file_loc* loc) {
+    return (struct token) {
+        .tag = TOKEN_STRING_LITERAL,
+        .loc = *loc,
+        .contents = contents,
+        .string_literal = str_view_shrink(contents, 1, 1)
+    };
+}
+
 static struct token stringify_macro_arg(struct preprocessor* preprocessor, struct macro_arg* macro_arg) {
     struct str str = str_create();
     str_push(&str, '\"');
@@ -376,12 +389,7 @@ static struct token stringify_macro_arg(struct preprocessor* preprocessor, struc
     const char* contents = str_pool_insert_view(preprocessor->str_pool, str_to_view(&str));
     str_destroy(&str);
 
-    return (struct token) {
-        .tag = TOKEN_STRING_LITERAL,
-        .loc = macro_arg->loc,
-        .contents = STR_VIEW(contents),
-        .string_literal = str_view_shrink(STR_VIEW(contents), 1, 1)
-    };
+    return make_string_literal_token(STR_VIEW(contents), &macro_arg->loc);
 }
 
 static inline struct token concatenate_tokens(
@@ -553,9 +561,13 @@ static struct token expand_token(struct preprocessor* preprocessor) {
         if (macro->has_params && !has_args)
             return token;
 
-        struct context* context = expand_macro(preprocessor, macro, &token.loc);
-        if (context)
-            push_context(preprocessor, context);
+        if (macro->callback) {
+            macro->callback(preprocessor, &token.loc);
+        } else {
+            struct context* context = expand_macro(preprocessor, macro, &token.loc);
+            if (context)
+                push_context(preprocessor, context);
+        }
     }
 }
 
@@ -583,13 +595,58 @@ static inline struct file_loc eat_extra_tokens(struct preprocessor* preprocessor
     return loc;
 }
 
-static void expand_file_macro(struct preprocessor*) {
+static inline struct source_file* find_containing_source_file(struct context* context) {
+    while (context && context->tag != CONTEXT_SOURCE_FILE)
+        context = context->prev;
+    assert(context);
+    assert(context->tag == CONTEXT_SOURCE_FILE);
+    return &context->source_file;
 }
 
-static void expand_line_macro(struct preprocessor*) {
+static void expand_file_macro(struct preprocessor* preprocessor, struct file_loc* loc) {
+    struct source_file* source_file = find_containing_source_file(preprocessor->context);
+    struct context* context = alloc_token_buffer_context(preprocessor->context);
+
+    struct str file_str = str_create();
+    str_printf(&file_str, "\"%s\"", source_file->displayed_file_name);
+    const char* file_string = str_pool_insert(preprocessor->str_pool, file_str.data);
+    str_destroy(&file_str);
+
+    struct token file_token = make_string_literal_token(STR_VIEW(file_string), loc);
+    token_vec_push(&context->token_buffer.tokens, &file_token);
+    finalize_context(context);
+    push_context(preprocessor, context);
 }
 
-static void register_custom_macro(struct preprocessor*, const char* name, void (*expand_macro)(struct preprocessor*)) {
+static void expand_line_macro(struct preprocessor* preprocessor, struct file_loc* loc) {
+    struct source_file* source_file = find_containing_source_file(preprocessor->context);
+    struct context* context = alloc_token_buffer_context(preprocessor->context);
+
+    struct str line_str = str_create();
+    str_printf(&line_str, "\"%"PRIu32"\"", source_file->displayed_line);
+    const char* line_string = str_pool_insert(preprocessor->str_pool, line_str.data);
+    str_destroy(&line_str);
+
+    struct token line_token = {
+        .tag = TOKEN_INT_LITERAL,
+        .loc = *loc,
+        .contents = STR_VIEW(line_string),
+        .int_literal = source_file->displayed_line
+    };
+    token_vec_push(&context->token_buffer.tokens, &line_token);
+    finalize_context(context);
+    push_context(preprocessor, context);
+}
+
+static void register_custom_macro(
+    struct preprocessor* preprocessor,
+    const char* name,
+    custom_macro_callback callback)
+{
+    insert_macro(preprocessor, &(struct macro) {
+        .name = str_pool_insert(preprocessor->str_pool, name),
+        .callback = callback
+    });
 }
 
 static void register_standard_macros(struct preprocessor* preprocessor) {
@@ -1129,15 +1186,15 @@ static struct str_view parse_include_file_name(struct preprocessor* preprocessor
     }
 }
 
-static inline bool does_file_exist_in_path(
-    struct str_view include_path,
-    struct str_view include_file_name,
+static inline bool does_file_exist_in_directory(
+    struct str_view directory,
+    struct str_view file_name,
     struct str* full_path)
 {
     str_clear(full_path);
     str_printf(full_path, "%.*s/%.*s",
-        (int)include_path.length,      include_path.data,
-        (int)include_file_name.length, include_file_name.data);
+        (int)directory.length, directory.data,
+        (int)file_name.length, file_name.data);
     return file_exists(full_path->data);
 }
 
@@ -1154,13 +1211,13 @@ static bool find_include_file_name(
                 continue;
 
             struct str_view include_path = split_path(STR_VIEW(context->source_file.cached_file->file_name)).dir_name;
-            if (does_file_exist_in_path(include_path, include_file_name, full_path))
+            if (does_file_exist_in_directory(include_path, include_file_name, full_path))
                 return true;
         }
     }
     for (size_t i = 0; preprocessor->include_paths[i]; ++i) {
         struct str_view include_path = STR_VIEW(preprocessor->include_paths[i]);
-        if (does_file_exist_in_path(include_path, include_file_name, full_path))
+        if (does_file_exist_in_directory(include_path, include_file_name, full_path))
             return true;
     }
     return false;

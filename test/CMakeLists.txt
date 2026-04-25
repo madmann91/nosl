@@ -45,10 +45,19 @@ add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/invalid_condition.osl"
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/extra_tokens.osl"            REGEX "extra tokens after '#endif'")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_macro_args.osl" REGEX "unterminated argument list for macro 'MACRO'")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/pragma.osl"                  REGEX "ignoring '#pragma'" ARGS --warns-as-errors)
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/invalid_directive.osl"       REGEX "invalid preprocessor directive")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/unterminated_include.osl"
     REGEX "\
 expected include file name, but got '\"unterminated_file_name_quotes'.*\
 unterminated include file name")
+
+add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/line.osl"
+    REGEX "\
+missing or invalid line number in '#line' directive.*\
+missing or invalid line number in '#line' directive.*\
+invalid file name '3' in '#line' directive.*\
+THIS MESSAGE SHOULD APPEAR ON LINE 4 IN FILE abcd.*\
+in abcd\\(4:[0-9]+ - 4:[0-9]+\\)")
 
 add_nosl_test(LABELS preprocessor FILE "preprocessor/fail/bad_concat_operator.osl"
     REGEX "\
@@ -63,7 +72,6 @@ division by zero while evaluating condition.*#if 1 % 0")
 
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/if_elif_else.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/warning.osl")
-add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/line.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/pragma_once.osl" ARGS --warns-as-errors)
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/undef.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/include.osl" ARGS -I ${PROJECT_SOURCE_DIR})
@@ -81,10 +89,19 @@ add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/conditions.osl")
 add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/stringify.osl" ARGS --print-ast REGEX
     REGEX ".*\
 string s1 = \"1\";.*\
-string s2 = \"( 1, 2 )\";.*\
+string s2 = \"\\( 1, 2 \\)\";.*\
 string s3 = \"\\\"A\\\" 1\";.*\
 string s4 = \"A, \\\"B\\\" C\";.*\
 string s5 = \"A B\";")
+
+add_nosl_test(LABELS preprocessor FILE "preprocessor/pass/line.osl" ARGS --print-ast REGEX
+    REGEX ".*\
+string s1 = \".*/line.osl\";.*\
+int l1 = 3;.*\
+string s2 = \"abcd\";.*\
+int l2 = 4;.*\
+string s3 = \"abcd\";.*\
+int l3 = 7;")
 
 # Frontend Tests ----------------------------------------------------------------------------------
 

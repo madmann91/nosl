@@ -5,8 +5,7 @@ remains completely compatible with the standard OSL implementation.
 
 ## Status
 
-- [ ] Preprocessor
-    - `__LINE__`, `__FILE__` are missing
+- [X] Preprocessor
 - [X] Parser
 - [ ] Type-checker
     - Texture-related built-in functions are missing

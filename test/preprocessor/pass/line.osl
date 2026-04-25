@@ -1,1 +1,11 @@
+shader test() {
+    string s1 = __FILE__;
+    int l1 = __LINE__;
 #line 1
+#line __LINE__ "abcd"
+    string s2 = __FILE__;
+    int l2 = __LINE__;
+#line __LINE__ __FILE__
+    string s3 = __FILE__;
+    int l3 = __LINE__;
+}
