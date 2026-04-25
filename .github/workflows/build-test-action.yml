@@ -16,7 +16,9 @@ jobs:
             cxx: clang++
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
       
       - name: Create build environment
         run: cmake -E make_directory ${{runner.workspace}}/build
