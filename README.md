@@ -7,9 +7,7 @@ remains completely compatible with the standard OSL implementation.
 
 - [X] Preprocessor
 - [X] Parser
-- [ ] Type-checker
-    - Texture-related built-in functions are missing
-    - Noise-related built-in functions are missing
+- [X] Type-checker
 - [ ] Backend
     - Not yet implemented
 

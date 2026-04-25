@@ -535,6 +535,13 @@ __attribute__((builtin)) float surfacearea();
 __attribute__((builtin)) bool backfacing();
 __attribute__((builtin)) bool raytype(string);
 
+__attribute__((builtin)) bool getattribute(string, ...);
+__attribute__((builtin)) void setmessage(string, ...);
+__attribute__((builtin)) bool getmessage(string, ...);
+
+__attribute__((builtin)) bool isconnected(...);
+__attribute__((builtin)) bool isconstant(...);
+
 // Cleanup ----------------------------------------------------------------------------------------
 
 #undef DET2
