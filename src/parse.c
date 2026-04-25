@@ -29,7 +29,7 @@ struct parser {
 
 static struct ast* parse_type(struct parser*);
 static struct ast* parse_expr(struct parser*);
-static struct ast* parse_primary_expr(struct parser*);
+static struct ast* parse_prefix_expr(struct parser*);
 static struct ast* parse_stmt(struct parser*);
 
 static inline void read_token(struct parser* parser) {
@@ -221,7 +221,7 @@ static struct ast* parse_cast_expr(struct parser* parser) {
     eat_token(parser, TOKEN_LPAREN);
     struct ast* type = parse_type(parser);
     expect_token(parser, TOKEN_RPAREN);
-    struct ast* value = parse_primary_expr(parser);
+    struct ast* value = parse_prefix_expr(parser);
     return alloc_ast(parser, &begin_loc, &(struct ast) {
         .tag = AST_CAST_EXPR,
         .cast_expr = {
@@ -313,36 +313,6 @@ static struct ast* parse_primary_expr(struct parser* parser) {
     }
 }
 
-static struct ast* parse_pre_unary_expr(struct parser* parser) {
-    struct file_loc begin_loc = parser->ahead->loc;
-    enum unary_expr_tag tag = token_tag_to_unary_expr_tag(parser->ahead->tag, true);
-    assert(tag != UNARY_EXPR_INVALID && "invalid prefix unary operation");
-    read_token(parser);
-
-    struct ast* arg = parse_primary_expr(parser);
-    return alloc_ast(parser, &begin_loc, &(struct ast) {
-        .tag = AST_UNARY_EXPR,
-        .unary_expr = {
-            .tag = tag,
-            .arg = arg
-        }
-    });
-}
-
-static struct ast* parse_prefix_expr(struct parser* parser) {
-    switch (parser->ahead->tag) {
-        case TOKEN_TILDE:
-        case TOKEN_NOT:
-        case TOKEN_SUB:
-        case TOKEN_INC:
-        case TOKEN_DEC:
-        case TOKEN_ADD:
-            return parse_pre_unary_expr(parser);
-        default:
-            return parse_primary_expr(parser);
-    }
-}
-
 static struct ast* parse_proj_expr(struct parser* parser, struct ast* value) {
     eat_token(parser, TOKEN_DOT);
     const char* elem = parse_ident(parser);
@@ -393,8 +363,7 @@ static struct ast* parse_call_expr(struct parser* parser, struct ast* callee) {
     });
 }
 
-static struct ast* parse_suffix_expr(struct parser* parser) {
-    struct ast* expr = parse_prefix_expr(parser);
+static struct ast* parse_suffix_expr(struct parser* parser, struct ast* expr) {
     while (true) {
         switch (parser->ahead->tag) {
             case TOKEN_DOT:      expr = parse_proj_expr(parser, expr);            break;
@@ -407,20 +376,39 @@ static struct ast* parse_suffix_expr(struct parser* parser) {
     }
 }
 
+static struct ast* parse_prefix_expr(struct parser* parser) {
+    struct file_loc begin_loc = parser->ahead->loc;
+    enum unary_expr_tag tag = token_tag_to_unary_expr_tag(parser->ahead->tag, true);
+    if (tag != UNARY_EXPR_INVALID)
+        read_token(parser);
+
+    struct ast* arg = parse_suffix_expr(parser, parse_primary_expr(parser));
+    if (tag == UNARY_EXPR_INVALID)
+        return arg;
+
+    return alloc_ast(parser, &begin_loc, &(struct ast) {
+        .tag = AST_UNARY_EXPR,
+        .unary_expr = {
+            .tag = tag,
+            .arg = arg
+        }
+    });
+}
+
 static struct ast* parse_binary_expr(struct parser* parser, struct ast* left, int prec) {
     while (true) {
         enum binary_expr_tag tag = token_tag_to_binary_expr_tag(parser->ahead->tag);
         if (tag == BINARY_EXPR_INVALID || binary_expr_tag_is_assign(tag))
-            return left;
+            break;
 
         int next_prec = binary_expr_tag_precedence(tag);
         if (next_prec < prec) {
             left = parse_binary_expr(parser, left, next_prec);
         } else if (next_prec > prec) {
-            return left;
+            break;
         } else {
             read_token(parser);
-            left->next = parse_binary_expr(parser, parse_suffix_expr(parser), prec - 1);
+            left->next = parse_binary_expr(parser, parse_prefix_expr(parser), prec - 1);
             left = alloc_ast(parser, &left->loc, &(struct ast) {
                 .tag = AST_BINARY_EXPR,
                 .binary_expr = {
@@ -430,11 +418,11 @@ static struct ast* parse_binary_expr(struct parser* parser, struct ast* left, in
             });
         }
     }
-    return parse_suffix_expr(parser);
+    return left;
 }
 
 static struct ast* parse_ternary_expr(struct parser* parser) {
-    struct ast* cond = parse_binary_expr(parser, parse_suffix_expr(parser), binary_expr_max_precedence(false));
+    struct ast* cond = parse_binary_expr(parser, parse_prefix_expr(parser), binary_expr_max_precedence(false));
     if (!accept_token(parser, TOKEN_QUESTION))
         return cond;
 

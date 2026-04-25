@@ -75,9 +75,9 @@ __attribute__((builtin)) int split(string, output string[], int);
 __attribute__((builtin)) int getchar(string, int);
 __attribute__((builtin)) int hash(string);
 __attribute__((builtin)) int regex_search(string, string);
-__attribute__((builtin)) int regex_search(string, int[], string);
+__attribute__((builtin)) int regex_search(string, output int[], string);
 __attribute__((builtin)) int regex_match(string, string);
-__attribute__((builtin)) int regex_match(string, int[], string);
+__attribute__((builtin)) int regex_match(string, output int[], string);
 
 // Color functions --------------------------------------------------------------------------------
 
@@ -508,6 +508,26 @@ void fresnel(
     Kt = (1 - F) * eta * eta;
     T = refract(I, N, eta);
 }
+
+// Textures ---------------------------------------------------------------------------------------
+
+__attribute__((builtin)) float texture(string, float, float, ...);
+__attribute__((builtin)) color texture(string, float, float, ...);
+__attribute__((builtin)) float texture(string, float, float, float, float, float, float, ...);
+__attribute__((builtin)) color texture(string, float, float, float, float, float, float, ...);
+
+__attribute__((builtin)) float texture3d(string, point, ...);
+__attribute__((builtin)) color texture3d(string, point, ...);
+__attribute__((builtin)) float texture3d(string, point, vector, vector, vector, ...);
+__attribute__((builtin)) color texture3d(string, point, vector, vector, vector, ...);
+
+__attribute__((builtin)) float environment(string, vector, ...);
+__attribute__((builtin)) color environment(string, vector, ...);
+__attribute__((builtin)) float environment(string, vector, vector, vector, ...);
+__attribute__((builtin)) color environment(string, vector, vector, vector, ...);
+
+__attribute__((builtin)) int gettextureinfo(string, string, ...);
+__attribute__((builtin)) int gettextureinfo(string, float, float, string, ...);
 
 // Renderer state ---------------------------------------------------------------------------------
 

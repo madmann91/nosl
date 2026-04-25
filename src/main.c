@@ -136,12 +136,6 @@ static void register_user_macros(struct preprocessor* preprocessor, const struct
 }
 
 static struct file_line read_line(void* data, const char* file_name, uint32_t line) {
-#if ENABLE_BUILTINS
-    // Compare the filename and the builtins filename by their address, since the lexer keeps the
-    // same file name string in the location info.
-    if (file_name == builtins_name)
-        return (struct file_line) {};
-#endif
     struct file_cache* file_cache = data;
     const struct cached_file* cached_file = file_cache_read(file_cache, file_name);
     if (!cached_file)
