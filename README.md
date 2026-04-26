@@ -1,6 +1,6 @@
 # NOSL
 
-![Workflow status](https://github.com/madmann91/nosl/workflows/build-test-action.yml/badge.svg)
+![Workflow status](https://github.com/madmann91/nosl/actions/workflows/build-test-action.yml/badge.svg)
 
 NOSL is not OSL, but is another OSL implementation that tries to improve the OSL compiler. It
 remains completely compatible with the standard OSL implementation.
