@@ -386,9 +386,11 @@ static inline struct ast* find_conflicting_overload(
     const struct type* type)
 {
     assert(type->tag == TYPE_FUNC);
+    struct small_ast_vec symbols;
+    small_ast_vec_init(&symbols);
+    env_find_all_symbols(type_checker->env, name, &symbols);
+
     struct ast* conflicting_overload = NULL;
-    struct small_ast_vec symbols = env_find_all_symbols(type_checker->env, name);
-    small_ast_vec_relocate(&symbols);
     VEC_FOREACH(struct ast*, symbol_ptr, symbols) {
         if ((*symbol_ptr)->type->tag == TYPE_FUNC && (*symbol_ptr)->type == type) {
             conflicting_overload = *symbol_ptr;
@@ -622,8 +624,10 @@ static const struct type* check_ident_expr(
 {
     struct ast* symbol = env_find_one_symbol(type_checker->env, ast->ident_expr.name);
     if (!symbol) {
-        struct small_ast_vec all_symbols = env_find_all_symbols(type_checker->env, ast->ident_expr.name);
-        small_ast_vec_relocate(&all_symbols);
+        struct small_ast_vec all_symbols;
+        small_ast_vec_init(&all_symbols);
+        env_find_all_symbols(type_checker->env, ast->ident_expr.name, &all_symbols);
+
         log_error(type_checker->log, &ast->loc,
             all_symbols.elem_count > 0
                 ? "cannot resolve overloaded identifier '%s'"
@@ -778,8 +782,9 @@ static struct ast* find_func_or_struct_with_name(
     const struct type* ret_type,
     struct ast* args)
 {
-    struct small_ast_vec symbols = env_find_all_symbols(type_checker->env, func_name);
-    small_ast_vec_relocate(&symbols);
+    struct small_ast_vec symbols;
+    small_ast_vec_init(&symbols);
+    env_find_all_symbols(type_checker->env, func_name, &symbols);
 
     struct ast* symbol = NULL;
     if (symbols.elem_count == 0) {

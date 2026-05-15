@@ -137,20 +137,16 @@ struct ast* env_find_one_symbol(struct env* env, const char* name) {
     return NULL;
 }
 
-struct small_ast_vec env_find_all_symbols(struct env* env, const char* name) {
-    struct small_ast_vec symbols;
-    small_ast_vec_init(&symbols);
-
+void env_find_all_symbols(struct env* env, const char* name, struct small_ast_vec* symbols) {
     struct scope* scope = env->scope;
     while (scope) {
         struct symbol* symbol = find_first_symbol(scope, name);
         while (symbol) {
-            small_ast_vec_push(&symbols, &symbol->ast);
+            small_ast_vec_push(symbols, &symbol->ast);
             symbol = symbol->next;
         }
         scope = scope->prev;
     }
-    return symbols;
 }
 
 bool env_insert_symbol(struct env* env, const char* name, struct ast* ast, bool allow_overload) {

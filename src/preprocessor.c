@@ -136,8 +136,8 @@ struct preprocessor {
     size_t inactive_cond_depth;
 };
 
-SMALL_VEC_DEFINE(small_str_view_vec, struct str_view, PRIVATE)
-SMALL_VEC_DEFINE(small_index_vec, size_t, PRIVATE)
+SMALL_VEC_DEFINE(small_str_view_vec, struct str_view, 4, PRIVATE)
+SMALL_VEC_DEFINE(small_index_vec, size_t, 4, PRIVATE)
 
 static struct token expand_token(struct preprocessor*);
 static int parse_cond(struct preprocessor*, bool);

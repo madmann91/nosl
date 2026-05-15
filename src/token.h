@@ -143,7 +143,7 @@ struct token {
 };
 
 VEC_DECL(token_vec, struct token, PUBLIC)
-SMALL_VEC_DECL(small_token_vec, struct token, PUBLIC)
+SMALL_VEC_DECL(small_token_vec, struct token, 4, PUBLIC)
 
 [[nodiscard]] const char* token_tag_to_string(enum token_tag);
 [[nodiscard]] bool token_tag_is_symbol(enum token_tag);

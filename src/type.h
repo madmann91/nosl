@@ -123,8 +123,8 @@ enum coercion_rank {
     COERCION_EXACT
 };
 
-SMALL_VEC_DECL(small_type_vec, const struct type*, PUBLIC)
-SMALL_VEC_DECL(small_func_param_vec, struct func_param, PUBLIC)
+SMALL_VEC_DECL(small_type_vec, const struct type*, 4, PUBLIC)
+SMALL_VEC_DECL(small_func_param_vec, struct func_param, 4, PUBLIC)
 
 [[nodiscard]] bool prim_type_is_scalar(enum prim_type);
 [[nodiscard]] bool prim_type_is_triple(enum prim_type);
