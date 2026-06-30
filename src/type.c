@@ -368,6 +368,5 @@ char* type_to_string(const struct type* type, const struct type_print_options* o
     struct mem_stream mem_stream;
     mem_stream_init(&mem_stream);
     type_print(mem_stream.file, type, options);
-    mem_stream_destroy(&mem_stream);
-    return mem_stream.buf;
+    return mem_stream_release(&mem_stream);
 }

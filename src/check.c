@@ -51,8 +51,7 @@ static inline char* call_signature_to_string(
             fputs(", ", mem_stream.file);
     }
     fputc(')', mem_stream.file);
-    mem_stream_destroy(&mem_stream);
-    return mem_stream.buf;
+    return mem_stream_release(&mem_stream);
 }
 
 static inline void report_invalid_type(
