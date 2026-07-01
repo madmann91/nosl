@@ -1,9 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(nosl VERSION 0.0.1)
 
-option(BUILD_SHARED_LIBS             "Build a shared library." ON)
-option(NOSL_ENABLE_ADDRESS_SANITIZER "Enables the address sanitizer" OFF)
-option(NOSL_ENABLE_UNDEF_SANITIZER   "Enables the undefined value sanitizer" OFF)
+option(BUILD_SHARED_LIBS "Build a shared library." ON)
 
 set(CMAKE_C_STANDARD 23)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
@@ -16,18 +14,20 @@ add_compile_options(
     $<$<C_COMPILER_ID:GNU,Clang>:-Wextra>
     $<$<C_COMPILER_ID:GNU,Clang>:-pedantic>)
 
-if (NOSL_ENABLE_ADDRESS_SANITIZER)
-    add_compile_options($<$<C_COMPILER_ID:GNU,Clang>:-fsanitize=address>)
-    add_link_options($<$<C_COMPILER_ID:GNU,Clang>:-fsanitize=address>)
-endif()
-
-if (NOSL_ENABLE_UNDEF_SANITIZER)
-    add_compile_options($<$<C_COMPILER_ID:GNU,Clang>:-fsanitize=undefined>)
-    add_link_options($<$<C_COMPILER_ID:GNU,Clang>:-fsanitize=undefined>)
-endif()
-
 if (PROJECT_IS_TOP_LEVEL)
-    option(NOSL_ENABLE_COVERAGE "Enables the 'Coverage' target" OFF)
+    option(NOSL_ENABLE_COVERAGE          "Enables code coverage build type and target." OFF)
+    option(NOSL_ENABLE_ADDRESS_SANITIZER "Enables the address sanitizer" OFF)
+    option(NOSL_ENABLE_UNDEF_SANITIZER   "Enables the undefined value sanitizer" OFF)
+
+    if (NOSL_ENABLE_ADDRESS_SANITIZER)
+        add_compile_options($<$<C_COMPILER_ID:GNU,Clang>:-fsanitize=address>)
+        add_link_options($<$<C_COMPILER_ID:GNU,Clang>:-fsanitize=address>)
+    endif()
+
+    if (NOSL_ENABLE_UNDEF_SANITIZER)
+        add_compile_options($<$<C_COMPILER_ID:GNU,Clang>:-fsanitize=undefined>)
+        add_link_options($<$<C_COMPILER_ID:GNU,Clang>:-fsanitize=undefined>)
+    endif()
 
     if (NOSL_ENABLE_COVERAGE)
         include(contrib/overture/cmake/Coverage.cmake)
